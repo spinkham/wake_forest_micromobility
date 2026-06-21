@@ -16,6 +16,7 @@ class (SPEED_INFER) and flagged as such.
 """
 import os
 import re
+from html import escape
 import geopandas as gpd
 import pandas as pd
 import folium
@@ -306,7 +307,8 @@ for fn, nm in SIGN_FILES:
         folium.CircleMarker(
             location=[r.geometry.y, r.geometry.x], radius=4, color="#222", weight=1,
             fill=True, fill_color=col, fill_opacity=0.95,
-            popup=folium.Popup(f"<b>{r['sign_type']}</b><br>{r.get('streets', '')}", max_width=220),
+            popup=folium.Popup(  # escape OSM-derived values (street names contain &, etc.)
+                f"<b>{escape(str(r['sign_type']))}</b><br>{escape(str(r.get('streets', '')))}", max_width=220),
         ).add_to(fg)
     fg.add_to(m)
 
