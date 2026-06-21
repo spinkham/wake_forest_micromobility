@@ -11,10 +11,13 @@ How it works
 1. Pull native-resolution blocks in Web Mercator (EPSG:3857) from the
    ImageServer `exportImage` endpoint. Blocks are aligned to the z{MAX} tile
    grid, so the base zoom slices out with no resampling.
-2. Slice each block into z{MAX} web tiles, masked to the town polygon
-   (transparent outside the corporate limits).
-3. Build the z{MAX-1}..z{MIN} overview pyramid by averaging down from the
-   base tiles (no extra server hits).
+2. Slice each block into opaque z{MAX} web tiles, keeping only tiles that
+   intersect the town. Tiles are NOT clipped/masked: a tile is either fully
+   cached or absent, so the cache-first map layer falls back per-tile to live
+   NC OneMap for anything not cached.
+3. Build the z{MAX-1}..z{MIN} overview pyramid by averaging down, emitting only
+   fully-covered (all-4-children) tiles so the pyramid stays opaque (no extra
+   server hits).
 
 Polite by construction: one request per block, exponential-backoff retries,
 a configurable delay, and it RESUMES -- a block whose tiles already exist is
@@ -28,7 +31,7 @@ Run from inside map/ (reads corporate_limits.geojson by default).
 
   python build_imagery_cache.py --dry-run         # plan: tile counts + size
   python build_imagery_cache.py                    # build z12-20 WebP cache
-  python build_imagery_cache.py --zoom-max 19 --format jpg   # smaller/no alpha
+  python build_imagery_cache.py --zoom-max 19 --format jpg   # smaller / shallower
 
 Imagery: NC OneMap / NC Orthoimagery Program (free public data; attribute
 "NC OneMap"). Non-commercial civic use. Be gentle with the server.
@@ -118,13 +121,14 @@ def fetch_block(sess, bounds, px, sleep, retries=4):
     raise RuntimeError(f"block fetch failed at {bounds}: {err}")
 
 
-def save_tile(rgb, a, path, fmt, quality, method):
+def save_tile(rgb, path, fmt, quality, method):
+    # Always opaque (no polygon clip / alpha mask): a tile is either fully cached
+    # or absent -> 404 -> the cache-first map layer falls back to live NC OneMap.
+    im = Image.fromarray(rgb, "RGB")
     if fmt in ("jpg", "jpeg"):
-        Image.fromarray(rgb, "RGB").save(path, "JPEG", quality=quality)   # no alpha
-    elif a.min() == 255:
-        Image.fromarray(rgb, "RGB").save(path, "WEBP", quality=quality, method=method)
+        im.save(path, "JPEG", quality=quality)
     else:
-        Image.fromarray(np.dstack([rgb, a]), "RGBA").save(path, "WEBP", quality=quality, method=method)
+        im.save(path, "WEBP", quality=quality, method=method)
 
 
 def tile_path(out, z, x, y, fmt):
@@ -144,22 +148,25 @@ def build_overviews(out, zmin, zmax, fmt, quality, method):
                 if ys.endswith("." + fmt):
                     cx, cy = int(xs), int(ys.split(".")[0])
                     parents.setdefault((cx // 2, cy // 2), []).append((cx, cy))
+        made = 0
         for (px_, py_), kids in parents.items():
-            canvas = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
-            for cx, cy in kids:
-                try:
-                    canvas.paste(Image.open(tile_path(out, z + 1, cx, cy, fmt)).convert("RGBA"),
-                                 ((cx & 1) * 256, (cy & 1) * 256))
-                except FileNotFoundError:
-                    pass
-            small = np.asarray(canvas.resize((256, 256), Image.LANCZOS))
-            if small[:, :, 3].max() == 0:
+            # Only build a fully-covered (all 4 children) overview tile so it is
+            # opaque; partial edges are left absent -> 404 -> live NC OneMap
+            # fallback. Keeps the pyramid clean (no transparent fringe).
+            need = {(2 * px_, 2 * py_), (2 * px_ + 1, 2 * py_),
+                    (2 * px_, 2 * py_ + 1), (2 * px_ + 1, 2 * py_ + 1)}
+            if set(kids) != need:
                 continue
+            canvas = Image.new("RGB", (512, 512))
+            for cx, cy in kids:
+                canvas.paste(Image.open(tile_path(out, z + 1, cx, cy, fmt)).convert("RGB"),
+                             ((cx & 1) * 256, (cy & 1) * 256))
+            small = np.ascontiguousarray(np.asarray(canvas.resize((256, 256), Image.LANCZOS)))
             os.makedirs(os.path.join(out, str(z), str(px_)), exist_ok=True)
-            save_tile(np.ascontiguousarray(small[:, :, :3]), small[:, :, 3],
-                      tile_path(out, z, px_, py_, fmt), fmt, quality, method)
+            save_tile(small, tile_path(out, z, px_, py_, fmt), fmt, quality, method)
             total += 1
-        print(f"  z{z}: {sum(1 for _ in parents)} overview tiles")
+            made += 1
+        print(f"  z{z}: {made} overview tiles")
     return total
 
 
@@ -224,10 +231,9 @@ def main():
             continue
         rgb = fetch_block(sess, bb, B * 256, a.sleep); fetched += 1
         for i, j, tx, ty in todo:
-            sub_a = al[j*256:(j+1)*256, i*256:(i+1)*256]
             sub_rgb = np.ascontiguousarray(rgb[j*256:(j+1)*256, i*256:(i+1)*256, :])
             os.makedirs(os.path.join(a.out, str(z), str(tx)), exist_ok=True)
-            save_tile(sub_rgb, sub_a, tile_path(a.out, z, tx, ty, a.format), a.format, a.quality, a.method)
+            save_tile(sub_rgb, tile_path(a.out, z, tx, ty, a.format), a.format, a.quality, a.method)
             written += 1
         if n % 10 == 0 or n == len(blocks):
             print(f"  block {n}/{len(blocks)} | fetched {fetched} skipped {skipped} | "
