@@ -230,17 +230,13 @@ folium.TileLayer("OpenStreetMap", name="OpenStreetMap", overlay=False, control=T
 # if the cache exists; max_native_zoom=20 (native 6-inch) so it overzooms 20->22
 # on the client with no extra tiles and no hits on the live ImageServer. The URL
 # is relative to the saved HTML (repo root); tiles live under map/tiles/.
-if os.path.isdir("tiles"):
-    folium.TileLayer(
-        "map/tiles/{z}/{x}/{y}.webp",
-        attr="NC OneMap Orthoimagery (NC 911 Board)",
-        name="Aerial — NC 6-inch (cached, fast overzoom)",
-        overlay=False, control=True, show=False,
-        min_zoom=12, max_native_zoom=20, max_zoom=22).add_to(m)
-    print("imagery cache found: added local NC 6-inch base layer (map/tiles/)")
-else:
-    print("no map/tiles/ cache: skipping local NC imagery layer "
-          "(build it with build_imagery_cache.py)")
+# Local NC 6-inch tile cache is wired in below as a cache-first layer (injected
+# JS, after the layer control exists), so it can fall back per-tile to live
+# NC OneMap for tiles outside the town clip.
+HAS_CACHE = os.path.isdir("tiles")
+print("imagery cache found: wiring cache-first NC 6-inch layer (map/tiles/ + NC OneMap fallback)"
+      if HAS_CACHE else
+      "no map/tiles/ cache: skipping local NC imagery layer (build it with build_imagery_cache.py)")
 
 folium.GeoJson(
     juris, name="Corporate limits",
@@ -339,6 +335,53 @@ m.get_root().html.add_child(folium.Element(f"""
     s.onload = addNC; document.head.appendChild(s);
   }}
   go();
+}})();
+</script>
+"""))
+
+# Cache-first NC 6-inch aerial: serve the local tile cache, and for any tile we
+# don't have (outside the town clip) fall back PER TILE to the live NC OneMap
+# ImageServer (exportImage on that tile's bbox). One selectable base layer,
+# off by default. Only emitted when the cache exists.
+if HAS_CACHE:
+    m.get_root().html.add_child(folium.Element(f"""
+<script>
+(function() {{
+  function ready() {{ return window.L && typeof {m.get_name()} !== 'undefined'
+                       && typeof {lc.get_name()} !== 'undefined'; }}
+  function add() {{
+    if (!ready()) {{ return setTimeout(add, 150); }}
+    var R = 20037508.342789244;
+    var NC = 'https://services.nconemap.gov/secure/rest/services/Imagery/'
+           + 'Orthoimagery_Latest/ImageServer/exportImage';
+    var CacheFirst = L.TileLayer.extend({{
+      createTile: function(coords, done) {{
+        var tile = document.createElement('img');
+        tile.setAttribute('role', 'presentation'); tile.alt = '';
+        var self = this, fell = false;
+        L.DomEvent.on(tile, 'load', L.bind(this._tileOnLoad, this, done, tile));
+        L.DomEvent.on(tile, 'error', function(e) {{
+          if (!fell) {{                       // local miss -> live NC OneMap for this tile's bbox
+            fell = true;
+            var n = Math.pow(2, coords.z), t = 2 * R / n;
+            var x0 = -R + coords.x * t, x1 = x0 + t, y1 = R - coords.y * t, y0 = y1 - t;
+            tile.src = NC + '?bbox=' + x0 + ',' + y0 + ',' + x1 + ',' + y1 +
+                       '&bboxSR=3857&imageSR=3857&size=256,256&format=jpgpng&f=image';
+          }} else {{
+            L.bind(self._tileOnError, self, done, tile)(e);
+          }}
+        }});
+        tile.src = this.getTileUrl(coords);
+        return tile;
+      }}
+    }});
+    var layer = new CacheFirst('map/tiles/{{z}}/{{x}}/{{y}}.webp', {{
+      minZoom: 12, maxNativeZoom: 20, maxZoom: 22,
+      attribution: 'NC OneMap Orthoimagery (NC 911 Board)'
+    }});
+    {lc.get_name()}.addBaseLayer(layer, 'Aerial — NC 6-inch (cached + NC OneMap fallback)');
+  }}
+  add();
 }})();
 </script>
 """))
