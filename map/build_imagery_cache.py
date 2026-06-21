@@ -38,6 +38,7 @@ Imagery: NC OneMap / NC Orthoimagery Program (free public data; attribute
 """
 import argparse
 import io
+import json
 import math
 import os
 import sys
@@ -46,13 +47,16 @@ import time
 import numpy as np
 from PIL import Image, ImageDraw
 import requests
-import geopandas as gpd
-from shapely.geometry import box
-from shapely.ops import unary_union
+from pyproj import Transformer
+from shapely.geometry import box, shape
+from shapely.ops import unary_union, transform as shp_transform
 from shapely.prepared import prep
 
-SERVICE = ("https://services.nconemap.gov/secure/rest/services/Imagery/"
-           "Orthoimagery_Latest/ImageServer/exportImage")
+# JPEG (lossy) display mosaic vs the 4-band DEFLATE (lossless) "analysis" mosaic.
+JPEG_SERVICE = ("https://services.nconemap.gov/secure/rest/services/Imagery/"
+                "Orthoimagery_Latest/ImageServer/exportImage")
+LOSSLESS_SERVICE = ("https://services.nconemap.gov/secure/rest/services/Imagery/"
+                    "Orthoimagery_Latest_Analysis/ImageServer/exportImage")
 R = 20037508.342789244          # web-mercator half-extent (m)
 TILE = 256
 SERVER_MAX_PX = 4100            # ImageServer maxImageHeight cap
@@ -82,8 +86,15 @@ def block_bounds(z, bx, by, B):
 
 # ---- town polygon -> per-block alpha mask ----------------------------------
 def town_rings(limits_path):
-    """Return (prepared_geom, raw_geom, [(exterior, [holes]), ...]) in EPSG:3857."""
-    g = unary_union(gpd.read_file(limits_path).to_crs(3857).geometry.values)
+    """Return (prepared_geom, raw_geom, [(exterior, [holes]), ...]) in EPSG:3857.
+
+    Reads the GeoJSON (EPSG:4326) and reprojects with pyproj -- no geopandas/GDAL,
+    so the build runs anywhere with just pip wheels (Pillow, numpy, requests,
+    shapely, pyproj)."""
+    gj = json.load(open(limits_path))
+    geoms = [shape(f["geometry"]) for f in gj["features"]] if "features" in gj else [shape(gj["geometry"])]
+    tf = Transformer.from_crs(4326, 3857, always_xy=True).transform
+    g = shp_transform(tf, unary_union(geoms))
     polys = list(g.geoms) if g.geom_type == "MultiPolygon" else [g]
     rings = [(list(p.exterior.coords), [list(h.coords) for h in p.interiors]) for p in polys]
     return prep(g), g, rings
@@ -102,14 +113,16 @@ def block_alpha(rings, minx, maxy, px, res):
 
 
 # ---- fetch + save -----------------------------------------------------------
-def fetch_block(sess, bounds, px, sleep, retries=4):
+def fetch_block(sess, url, bounds, px, sleep, extra=None, retries=4):
     minx, miny, maxx, maxy = bounds
     params = {"bbox": f"{minx},{miny},{maxx},{maxy}", "bboxSR": 3857, "imageSR": 3857,
               "size": f"{px},{px}", "format": "png", "f": "image"}
+    if extra:
+        params.update(extra)
     err = "?"
     for attempt in range(retries):
         try:
-            r = sess.get(SERVICE, params=params, timeout=120)
+            r = sess.get(url, params=params, timeout=120)
             if r.status_code == 200 and r.headers.get("content-type", "").startswith("image"):
                 return np.asarray(Image.open(io.BytesIO(r.content)).convert("RGB"))
             err = f"HTTP {r.status_code} {r.headers.get('content-type')}"
@@ -183,12 +196,19 @@ def main():
     ap.add_argument("--sleep", type=float, default=0.4, help="seconds between block requests")
     ap.add_argument("--max-blocks", type=int, default=0, help="stop after N blocks (testing)")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--lossless", action="store_true",
+                    help="source from the lossless DEFLATE _Analysis mosaic (RGB via bandIds + "
+                         "cubic resampling) instead of the JPEG service; pair with --quality 90")
     a = ap.parse_args()
     B, z = a.block_tiles, a.zoom_max
     if B * 256 > SERVER_MAX_PX:
         sys.exit(f"--block-tiles {B} -> {B*256}px exceeds server cap {SERVER_MAX_PX}")
-    if a.format == "jpg":
-        print("note: jpg has no alpha -> tiles on the town border keep their out-of-town pixels", file=sys.stderr)
+    if a.lossless:
+        service = LOSSLESS_SERVICE
+        extra = {"bandIds": "0,1,2", "interpolation": "RSP_CubicConvolution"}
+        print("source: Orthoimagery_Latest_Analysis (lossless DEFLATE) -> RGB + cubic resampling")
+    else:
+        service, extra = JPEG_SERVICE, None
 
     prepared, geom, rings = town_rings(a.limits)
     minx, miny, maxx, maxy = geom.bounds
@@ -229,7 +249,7 @@ def main():
         if not todo:
             skipped += 1
             continue
-        rgb = fetch_block(sess, bb, B * 256, a.sleep); fetched += 1
+        rgb = fetch_block(sess, service, bb, B * 256, a.sleep, extra); fetched += 1
         for i, j, tx, ty in todo:
             sub_rgb = np.ascontiguousarray(rgb[j*256:(j+1)*256, i*256:(i+1)*256, :])
             os.makedirs(os.path.join(a.out, str(z), str(tx)), exist_ok=True)
