@@ -19,3 +19,6 @@ map/*.png
 map/*.jpg
 map/*.xml
 map/*.log
+
+# Imagery tile cache built by build_imagery_cache.py (large; not committed)
+map/tiles/

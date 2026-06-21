@@ -14,6 +14,7 @@ unincorporated enclaves are kept.
 Speed: OSM `maxspeed` where tagged (~8% of lines); otherwise inferred from road
 class (SPEED_INFER) and flagged as such.
 """
+import os
 import re
 import geopandas as gpd
 import pandas as pd
@@ -204,16 +205,42 @@ LAYERS = [
 
 # ---- map --------------------------------------------------------------------
 b = juris.total_bounds
-m = folium.Map(tiles="CartoDB positron", control_scale=True)
+# max_zoom 22 lets layers "overzoom" (client-side upscale) past their own native
+# level; each base layer sets max_native_zoom so it stops fetching real tiles
+# there and scales those up instead of vanishing / 404ing.
+m = folium.Map(tiles=None, control_scale=True, max_zoom=22)
 m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
+
+# default street basemap (added first => shown by default)
+folium.TileLayer("CartoDB positron", name="CartoDB Positron",
+                 overlay=False, control=True, max_native_zoom=20, max_zoom=22).add_to(m)
 
 # free aerial basemaps (choose in layer control). Esri World Imagery is omitted:
 # its terms + Maxar redistribution limits aren't clean for a public site.
+# aerial / alternate bases: show=False so only CartoDB is on the map at load
+# (folium adds every base layer to the map; without this the last one wins).
 folium.TileLayer(
     "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}",
     attr="USGS The National Map", name="Aerial — USGS Imagery",
-    overlay=False, control=True, max_zoom=16).add_to(m)
-folium.TileLayer("OpenStreetMap", name="OpenStreetMap", overlay=False, control=True).add_to(m)
+    overlay=False, control=True, show=False, max_native_zoom=16, max_zoom=22).add_to(m)
+folium.TileLayer("OpenStreetMap", name="OpenStreetMap", overlay=False, control=True,
+                 show=False, max_native_zoom=19, max_zoom=22).add_to(m)
+
+# locally built NC OneMap 6-inch tile cache (build_imagery_cache.py). Added only
+# if the cache exists; max_native_zoom=20 (native 6-inch) so it overzooms 20->22
+# on the client with no extra tiles and no hits on the live ImageServer. The URL
+# is relative to the saved HTML (repo root); tiles live under map/tiles/.
+if os.path.isdir("tiles"):
+    folium.TileLayer(
+        "map/tiles/{z}/{x}/{y}.webp",
+        attr="NC OneMap Orthoimagery (NC 911 Board)",
+        name="Aerial — NC 6-inch (cached, fast overzoom)",
+        overlay=False, control=True, show=False,
+        min_zoom=12, max_native_zoom=20, max_zoom=22).add_to(m)
+    print("imagery cache found: added local NC 6-inch base layer (map/tiles/)")
+else:
+    print("no map/tiles/ cache: skipping local NC imagery layer "
+          "(build it with build_imagery_cache.py)")
 
 folium.GeoJson(
     juris, name="Corporate limits",
@@ -300,7 +327,7 @@ m.get_root().html.add_child(folium.Element(f"""
   function addNC() {{
     var nc = L.esri.imageMapLayer({{
       url: 'https://services.nconemap.gov/secure/rest/services/Imagery/Orthoimagery_Latest/ImageServer',
-      attribution: 'NC OneMap Orthoimagery (NC 911 Board)', maxZoom: 21
+      attribution: 'NC OneMap Orthoimagery (NC 911 Board)', maxZoom: 22
     }});
     {lc.get_name()}.addBaseLayer(nc, 'Aerial — NC OneMap orthos (6 in)');
   }}
