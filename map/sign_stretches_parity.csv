@@ -1,0 +1,32 @@
+stretch_id,street,length_mi,sidewalk_sides,n_sign_nodes
+0,Chalk Road,0.012,1,3
+1,Jones Dairy Road,0.285,2,3
+2,Stadium Drive,0.922,1,4
+3,East Elm Avenue,0.039,2,2
+4,West Oak Avenue,0.065,1,2
+5,South Main Street,1.271,1,6
+6,South Main Street,1.66,2,9
+7,Ligon Mill Road,0.077,1,2
+8,Ligon Mill Road,0.567,1,2
+9,Wait Avenue,0.852,1,3
+10,North White Street,0.085,1,2
+11,Heritage Lake Road,0.776,2,2
+12,Carriage Meadows Drive,0.241,1,2
+13,North White Street,2.117,2,6
+14,North Main Street,1.16,2,5
+15,Retail Drive,0.774,2,2
+16,Rogers Road,1.097,2,7
+17,One World Way,0.097,1,2
+18,Rogers Road,0.076,2,2
+19,Wait Avenue,0.008,2,2
+20,Forestville Road,0.15,2,2
+21,Wake Union Church Road,0.084,1,2
+22,Gateway Commons Circle,0.063,2,2
+23,Wait Avenue,0.01,1,2
+24,Caveness Farms Avenue,0.031,1,3
+25,Rogers Branch Road,0.015,1,2
+26,Averette Road,0.043,1,2
+27,Gateway Commons Circle,0.06,2,2
+28,Averette Road,0.174,1,2
+29,East Holding Avenue,0.131,1,5
+30,Friendship Chapel Road,0.212,2,2

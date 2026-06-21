@@ -1,0 +1,126 @@
+post_id,lat,lon,sign_type,streets
+0,35.958099,-78.487661,begin/end,Chalk Road
+1,35.958137,-78.487482,major-crossing,Chalk Road
+2,35.96013,-78.485138,begin/end,Jones Dairy Road
+3,35.959983,-78.484975,begin/end,Jones Dairy Road
+4,35.960853,-78.485484,begin/end,Jones Dairy Road
+5,35.960729,-78.485675,begin/end,Jones Dairy Road
+6,35.957876,-78.482198,begin/end,Jones Dairy Road
+7,35.990088,-78.52584,begin/end,Stadium Drive
+8,35.982648,-78.512891,begin/end,Stadium Drive
+9,35.9827,-78.51341,major-crossing,Stadium Drive
+10,35.982502,-78.513418,major-crossing,Stadium Drive
+11,35.975726,-78.511239,begin/end,East Elm Avenue
+12,35.975549,-78.511348,begin/end,East Elm Avenue
+13,35.975357,-78.510671,begin/end,East Elm Avenue
+14,35.975548,-78.510607,begin/end,East Elm Avenue
+15,35.991985,-78.510072,begin/end,West Oak Avenue
+16,35.992668,-78.51082,begin/end,West Oak Avenue
+17,35.948663,-78.53037,begin/end,South Main Street
+18,35.951681,-78.522811,begin/end,South Main Street
+19,35.956089,-78.525016,begin/end,South Main Street
+20,35.947232,-78.536221,begin/end,South Main Street
+21,35.947069,-78.536082,begin/end,South Main Street
+22,35.949736,-78.531111,major-crossing,South Main Street
+23,35.948366,-78.53425,major-crossing,South Main Street
+24,35.948199,-78.534118,major-crossing,South Main Street
+25,35.961243,-78.518545,begin/end,South Main Street
+26,35.97879,-78.511842,begin/end,South Main Street
+27,35.960625,-78.523807,begin/end,South Main Street
+28,35.976285,-78.512923,major-crossing,South Main Street
+29,35.976213,-78.512695,major-crossing,South Main Street
+30,35.966211,-78.517521,major-crossing,South Main Street
+31,35.966261,-78.517757,major-crossing,South Main Street
+32,35.966408,-78.517705,major-crossing,South Main Street
+33,35.966356,-78.517469,major-crossing,South Main Street
+34,35.972688,-78.515206,major-crossing,South Main Street
+35,35.97277,-78.515428,major-crossing,South Main Street
+36,35.978515,-78.512032,major-crossing,South Main Street
+37,35.978555,-78.512271,major-crossing,South Main Street
+38,35.931814,-78.52879,begin/end,Ligon Mill Road
+39,35.930727,-78.528516,begin/end,Ligon Mill Road
+40,35.943874,-78.530948,begin/end,Ligon Mill Road
+41,35.936381,-78.532816,begin/end,Ligon Mill Road
+42,35.971626,-78.493579,begin/end,Wait Avenue
+43,35.977575,-78.505387,begin/end,Wait Avenue
+44,35.977396,-78.505491,begin/end,Wait Avenue
+45,35.975888,-78.501366,major-crossing,Wait Avenue
+46,35.994742,-78.490233,begin/end,North White Street
+47,35.993763,-78.49119,begin/end,North White Street
+48,35.951439,-78.500763,begin/end,Heritage Lake Road
+49,35.95142,-78.50052,begin/end,Heritage Lake Road
+50,35.961697,-78.498612,begin/end,Heritage Lake Road
+51,35.961813,-78.498809,begin/end,Heritage Lake Road
+52,35.935012,-78.528441,begin/end,Carriage Meadows Drive
+53,35.935098,-78.524628,begin/end,Carriage Meadows Drive
+54,35.981653,-78.493944,begin/end,North White Street
+55,35.981832,-78.493839,begin/end,North White Street
+56,35.992973,-78.492274,begin/end,North White Street
+57,35.979333,-78.509424,begin/end,North White Street
+58,35.979276,-78.50919,begin/end,North White Street
+59,35.988576,-78.499066,major-crossing,North White Street
+60,35.99112,-78.495279,major-crossing,North White Street
+61,35.982491,-78.50066,major-crossing,North White Street
+62,35.982672,-78.50056,major-crossing,North White Street
+63,35.989114,-78.505484,begin/end,North Main Street
+64,35.981531,-78.510501,begin/end,North Main Street
+65,35.981356,-78.510616,begin/end,North Main Street
+66,35.986685,-78.507159,major-crossing,North Main Street
+67,35.986536,-78.506839,major-crossing,North Main Street
+68,35.981404,-78.510321,major-crossing,North Main Street
+69,35.966905,-78.544057,begin/end,Retail Drive
+70,35.966758,-78.543894,begin/end,Retail Drive
+71,35.976324,-78.543337,begin/end,Retail Drive
+72,35.976363,-78.543576,begin/end,Retail Drive
+73,35.943512,-78.507231,begin/end,Rogers Road
+74,35.943489,-78.506989,begin/end,Rogers Road
+75,35.950418,-78.513143,begin/end,Rogers Road
+76,35.95042,-78.513386,begin/end,Rogers Road
+77,35.950262,-78.514635,begin/end,Rogers Road
+78,35.950065,-78.514609,begin/end,Rogers Road
+79,35.95019,-78.509518,begin/end,Rogers Road
+80,35.950248,-78.509751,begin/end,Rogers Road
+81,35.944623,-78.502291,begin/end,Rogers Road
+82,35.944682,-78.502523,begin/end,Rogers Road
+83,35.946321,-78.505514,major-crossing,Rogers Road
+84,35.94443,-78.502494,major-crossing,Rogers Road
+85,35.920166,-78.538025,begin/end,One World Way
+86,35.921542,-78.537639,begin/end,One World Way
+87,35.940538,-78.487979,begin/end,Rogers Road
+88,35.940717,-78.487874,begin/end,Rogers Road
+89,35.941099,-78.489149,begin/end,Rogers Road
+90,35.967446,-78.475098,begin/end,Wait Avenue
+91,35.967629,-78.474923,begin/end,Wait Avenue
+92,35.939299,-78.507521,begin/end,Forestville Road
+93,35.93713,-78.507336,begin/end,Forestville Road
+94,35.937165,-78.507096,begin/end,Forestville Road
+95,35.980535,-78.544186,begin/end,Wake Union Church Road
+96,35.981402,-78.543156,begin/end,Wake Union Church Road
+97,35.968366,-78.495139,begin/end,Gateway Commons Circle
+98,35.968439,-78.494913,begin/end,Gateway Commons Circle
+99,35.969284,-78.49532,begin/end,Gateway Commons Circle
+100,35.969211,-78.495547,begin/end,Gateway Commons Circle
+101,35.978155,-78.507318,begin/end,Wait Avenue
+102,35.97814,-78.507498,begin/end,Wait Avenue
+103,35.959281,-78.533944,begin/end,Caveness Farms Avenue
+104,35.959712,-78.533685,begin/end,Caveness Farms Avenue
+105,35.959473,-78.533788,major-crossing,Caveness Farms Avenue
+106,35.943715,-78.505066,begin/end,Rogers Branch Road
+107,35.943681,-78.504805,begin/end,Rogers Branch Road
+108,35.969052,-78.454316,begin/end,Averette Road
+109,35.968653,-78.453727,begin/end,Averette Road
+110,35.965964,-78.496726,begin/end,Gateway Commons Circle
+111,35.966162,-78.496711,begin/end,Gateway Commons Circle
+112,35.966177,-78.497769,major-crossing,Gateway Commons Circle
+113,35.972346,-78.458876,begin/end,Averette Road
+114,35.974858,-78.459154,begin/end,Averette Road
+115,35.969085,-78.509022,begin/end,East Holding Avenue
+116,35.97058,-78.510429,begin/end,East Holding Avenue
+117,35.970434,-78.510593,begin/end,East Holding Avenue
+118,35.969592,-78.509106,major-crossing,East Holding Avenue
+119,35.969481,-78.509308,major-crossing,East Holding Avenue
+120,35.969313,-78.509181,major-crossing,East Holding Avenue
+121,35.965939,-78.49278,begin/end,Friendship Chapel Road
+122,35.966111,-78.492902,begin/end,Friendship Chapel Road
+123,35.96465,-78.496209,begin/end,Friendship Chapel Road
+124,35.964463,-78.496126,begin/end,Friendship Chapel Road

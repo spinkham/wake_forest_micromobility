@@ -1,0 +1,21 @@
+# Generated / downloaded PDFs
+*.pdf
+
+# Local Claude Code config
+.claude/
+
+# Python virtual environment + caches
+.venv/
+__pycache__/
+map/pip_install.log
+
+# Source-data caches and build intermediates
+# (committed outputs are map/*.geojson, map/*.csv, and figures/*.png)
+map/osm_cache/
+map/cache/
+map/wf_graph.pkl
+map/*.json
+map/*.png
+map/*.jpg
+map/*.xml
+map/*.log

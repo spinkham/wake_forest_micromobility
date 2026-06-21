@@ -1,0 +1,13 @@
+# Python dependencies for the Wake Forest micromobility analysis and maps.
+# Tested versions (Python 3.11+).  Install:  pip install -r requirements.txt
+osmnx==2.1.0
+geopandas==1.1.3
+shapely==2.1.2
+pyproj==3.7.2
+networkx==3.6.1
+folium==0.20.0
+contextily==1.7.0
+matplotlib==3.11.0
+numpy==2.4.6
+pandas==3.0.3
+requests==2.34.2
