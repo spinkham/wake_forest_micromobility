@@ -41,8 +41,13 @@ import io
 import json
 import math
 import os
+import shlex
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -62,6 +67,10 @@ TILE = 256
 SERVER_MAX_PX = 4100            # ImageServer maxImageHeight cap
 # Generic UA -- deliberately no personal contact info (public repo).
 UA = "wake-forest-micromobility civic map; non-commercial imagery cache"
+
+CWEBP = None            # path to the cwebp binary; set when --cwebp is used
+CWEBP_FLAGS = None      # list of cwebp flags; None -> encode WebP with Pillow
+TMPDIR = "/dev/shm" if os.path.isdir("/dev/shm") else None  # RAM tmp for cwebp input
 
 
 def res_at(z):                  # 3857 metres per pixel at zoom z
@@ -137,6 +146,15 @@ def fetch_block(sess, url, bounds, px, sleep, extra=None, retries=4):
 def save_tile(rgb, path, fmt, quality, method):
     # Always opaque (no polygon clip / alpha mask): a tile is either fully cached
     # or absent -> 404 -> the cache-first map layer falls back to live NC OneMap.
+    if fmt == "webp" and CWEBP_FLAGS:        # encode via the cwebp CLI (e.g. for -sharp_yuv)
+        fd, tmp = tempfile.mkstemp(suffix=".png", dir=TMPDIR)
+        os.close(fd)
+        try:
+            Image.fromarray(rgb, "RGB").save(tmp, "PNG")
+            subprocess.run([CWEBP, "-quiet", *CWEBP_FLAGS, tmp, "-o", path], check=True)
+        finally:
+            os.unlink(tmp)
+        return
     im = Image.fromarray(rgb, "RGB")
     if fmt in ("jpg", "jpeg"):
         im.save(path, "JPEG", quality=quality)
@@ -149,7 +167,7 @@ def tile_path(out, z, x, y, fmt):
 
 
 # ---- overview pyramid -------------------------------------------------------
-def build_overviews(out, zmin, zmax, fmt, quality, method):
+def build_overviews(out, zmin, zmax, fmt, quality, method, pool=None):
     total = 0
     for z in range(zmax - 1, zmin - 1, -1):
         cz = os.path.join(out, str(z + 1))
@@ -161,15 +179,16 @@ def build_overviews(out, zmin, zmax, fmt, quality, method):
                 if ys.endswith("." + fmt):
                     cx, cy = int(xs), int(ys.split(".")[0])
                     parents.setdefault((cx // 2, cy // 2), []).append((cx, cy))
-        made = 0
-        for (px_, py_), kids in parents.items():
+
+        def _one(item, z=z):
             # Only build a fully-covered (all 4 children) overview tile so it is
             # opaque; partial edges are left absent -> 404 -> live NC OneMap
             # fallback. Keeps the pyramid clean (no transparent fringe).
+            (px_, py_), kids = item
             need = {(2 * px_, 2 * py_), (2 * px_ + 1, 2 * py_),
                     (2 * px_, 2 * py_ + 1), (2 * px_ + 1, 2 * py_ + 1)}
             if set(kids) != need:
-                continue
+                return 0
             canvas = Image.new("RGB", (512, 512))
             for cx, cy in kids:
                 canvas.paste(Image.open(tile_path(out, z + 1, cx, cy, fmt)).convert("RGB"),
@@ -177,8 +196,10 @@ def build_overviews(out, zmin, zmax, fmt, quality, method):
             small = np.ascontiguousarray(np.asarray(canvas.resize((256, 256), Image.LANCZOS)))
             os.makedirs(os.path.join(out, str(z), str(px_)), exist_ok=True)
             save_tile(small, tile_path(out, z, px_, py_, fmt), fmt, quality, method)
-            total += 1
-            made += 1
+            return 1
+
+        made = sum(pool.map(_one, parents.items())) if pool else sum(_one(it) for it in parents.items())
+        total += made
         print(f"  z{z}: {made} overview tiles")
     return total
 
@@ -192,7 +213,10 @@ def main():
     ap.add_argument("--block-tiles", type=int, default=16, help="block = N*256 px per request (<=4100)")
     ap.add_argument("--format", choices=["webp", "jpg"], default="webp")
     ap.add_argument("--quality", type=int, default=80)
-    ap.add_argument("--method", type=int, default=6, help="WebP effort 0-6")
+    ap.add_argument("--method", type=int, default=6, help="WebP effort 0-6 (Pillow path)")
+    ap.add_argument("--cwebp", default="", help="encode WebP via the cwebp CLI with these flags "
+                    "(e.g. '-q 90 -m 6 -sharp_yuv -pass 10'); parallelized. Default uses Pillow.")
+    ap.add_argument("--workers", type=int, default=0, help="parallel encode workers for --cwebp (0 = cpu count)")
     ap.add_argument("--sleep", type=float, default=0.4, help="seconds between block requests")
     ap.add_argument("--max-blocks", type=int, default=0, help="stop after N blocks (testing)")
     ap.add_argument("--dry-run", action="store_true")
@@ -209,6 +233,17 @@ def main():
         print("source: Orthoimagery_Latest_Analysis (lossless DEFLATE) -> RGB + cubic resampling")
     else:
         service, extra = JPEG_SERVICE, None
+
+    global CWEBP, CWEBP_FLAGS
+    pool = None
+    if a.cwebp:
+        CWEBP = shutil.which("cwebp") or os.path.expanduser("~/bin/cwebp")
+        if not os.path.exists(CWEBP):
+            sys.exit("cwebp not found on PATH or in ~/bin; install it or drop --cwebp")
+        CWEBP_FLAGS = shlex.split(a.cwebp)
+        nw = a.workers or (os.cpu_count() or 4)
+        pool = ThreadPoolExecutor(max_workers=nw)
+        print(f"encoder: cwebp {' '.join(CWEBP_FLAGS)}  ({nw} parallel workers)")
 
     prepared, geom, rings = town_rings(a.limits)
     minx, miny, maxx, maxy = geom.bounds
@@ -250,11 +285,17 @@ def main():
             skipped += 1
             continue
         rgb = fetch_block(sess, service, bb, B * 256, a.sleep, extra); fetched += 1
-        for i, j, tx, ty in todo:
+        def _enc(t, rgb=rgb):
+            i, j, tx, ty = t
             sub_rgb = np.ascontiguousarray(rgb[j*256:(j+1)*256, i*256:(i+1)*256, :])
             os.makedirs(os.path.join(a.out, str(z), str(tx)), exist_ok=True)
             save_tile(sub_rgb, tile_path(a.out, z, tx, ty, a.format), a.format, a.quality, a.method)
-            written += 1
+        if pool:
+            list(pool.map(_enc, todo))
+        else:
+            for t in todo:
+                _enc(t)
+        written += len(todo)
         if n % 10 == 0 or n == len(blocks):
             print(f"  block {n}/{len(blocks)} | fetched {fetched} skipped {skipped} | "
                   f"{written:,} base tiles | {time.time()-t0:.0f}s")
@@ -262,7 +303,7 @@ def main():
 
     print(f"base done: {written:,} z{z} tiles ({fetched} blocks fetched, {skipped} already cached)")
     print("building overviews...")
-    nov = build_overviews(a.out, a.zoom_min, z, a.format, a.quality, a.method)
+    nov = build_overviews(a.out, a.zoom_min, z, a.format, a.quality, a.method, pool=pool)
     print(f"done: {written:,} base + {nov:,} overview tiles in {a.out}/  ({time.time()-t0:.0f}s)")
     print(f"\nfolium/Leaflet usage (max_native_zoom = free client-side overzoom past z{z}):")
     print(f'  TileLayer(tiles="{a.out}/{{z}}/{{x}}/{{y}}.{a.format}", attr="NC OneMap",')
