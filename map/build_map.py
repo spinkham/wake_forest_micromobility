@@ -332,6 +332,8 @@ m.get_root().html.add_child(folium.Element(f"""
     if (window.L.esri) {{ return addNC(); }}
     var s = document.createElement('script');
     s.src = 'https://unpkg.com/esri-leaflet@3.1.0/dist/esri-leaflet.js';
+    s.integrity = 'sha384-mKRQp1R6awFM9WTPEGlZKBnRttP7Atg62pKG7fruF45ZRzyXYikoW7bqzPi7w6Ul';
+    s.crossOrigin = 'anonymous';
     s.onload = addNC; document.head.appendChild(s);
   }}
   go();
@@ -489,7 +491,47 @@ m.get_root().html.add_child(folium.Element(legend))
 
 out = "../wake-forest-micromobility-map.html"
 m.save(out)
-print("saved", out)
+
+# Subresource Integrity: pin every third-party CDN asset folium emits (scripts +
+# styles) so a CDN compromise can't inject code or styling into the page. Hashes
+# are sha384 of the exact uncompressed bytes of these version-pinned URLs;
+# crossorigin is required for SRI and all these CDNs send CORS. The dynamically
+# loaded esri-leaflet is pinned in its injected loader above. Any external
+# subresource without a known hash is flagged (e.g. if a folium upgrade bumps a
+# version) but left untouched -- fail-open, never silently broken.
+SRI = {
+    "https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js":
+        "sha384-okbbMvvx/qfQkmiQKfd5VifbKZ/W8p1qIsWvE1ROPUfHWsDcC8/BnHohF7vPg2T6",
+    "https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css":
+        "sha384-o/2yZuJZWGJ4s/adjxVW71R+EO/LyCwdQfP5UWSgX/w87iiTXuvDZaejd3TsN7mf",
+    "https://code.jquery.com/jquery-3.7.1.min.js":
+        "sha384-1H217gwSVyLSIfaLxHbE7dRb3v4mYCKbpQvzx0cegeju1MVsGrX5xXxAvs/HgeFs",
+    "https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js":
+        "sha384-OERcA2EqjJCMA+/3y+gxIOqMEjwtxJY7qPCqsdltbNJuaOe923+mo//f6V8Qbsw3",
+    "https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css":
+        "sha384-Zenh87qX5JnK2Jl0vWa8Ck2rdkQ2Bzep5IDxbcnCeuOxjzrPF/et3URy9Bv1WTRi",
+    "https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js":
+        "sha384-p96PkhiqMxDcor51hgckjZOJvsNNKl4Uy25L8da4p+suI14Ftn3sOuFs+IPN4vFm",
+    "https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css":
+        "sha384-AHhmp36MxTYxqK8q9BF7ifcAjDEpcCT+OOmZrBb8vBP6At1I/htDyRK/M8wgzuqx",
+    "https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css":
+        "sha384-BTIWC/F2/I+C/O+ojS/83R360V1iJjuVMMx7RKE9ngqKkXUNVbWv/izbGgjTgbuA",
+    "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css":
+        "sha384-SOnAn/m2fVJCwnbEYgD4xzrPtvsXdElhOVvR8ND1YjB5nhGNwwf7nBQlhfAwHAZC",
+    "https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css":
+        "sha384-f+5ueJUSVTts5w31cpiAeriD3134eXSnL//1cJCcmTPkyO6v7j98iJKup9dv6+fg",
+}
+html = open(out, encoding="utf-8").read()
+for url, h in SRI.items():
+    html, n = re.subn(re.escape(f'"{url}"'),
+                      f'"{url}" integrity="{h}" crossorigin="anonymous"', html, count=1)
+    if n == 0:
+        print("  SRI: URL not found in HTML (skipped):", url)
+for mt in re.finditer(r'<(?:script|link)\b[^>]*?(?:src|href)="(https://[^"]+)"[^>]*?>', html):
+    if "integrity=" not in mt.group(0):
+        print("  SRI WARNING: external subresource without integrity:", mt.group(1))
+open(out, "w", encoding="utf-8").write(html)
+print("saved", out, f"(SRI pinned: {len(SRI)} CDN assets + esri-leaflet)")
 print("\n=== category stats (features, miles) ===")
 for n, (cnt, mi) in stats.items():
     print(f"  {n:42s} {cnt:5d} feats  {mi:7.1f} mi")
