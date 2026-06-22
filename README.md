@@ -64,6 +64,11 @@ multi-use paths come from the Town of Wake Forest's open GIS. Posted speeds come
 from NCDOT. See [DATA_LICENSE.md](DATA_LICENSE.md) for the per-source terms and
 attribution. OpenStreetMap-derived data is under the ODbL (share-alike).
 
+The **code** in this repository (the Python scripts) is released under the
+**MIT License** — see [LICENSE](LICENSE). MIT covers the code only; the
+committed data keeps the terms above (the OpenStreetMap-derived GeoJSON remains
+ODbL, share-alike).
+
 This is a non-commercial civic project. The analysis is my own and is not an
 official product of the Town of Wake Forest. All figures are modeled estimates
 from the data above. See the code for assumptions and caveats.
