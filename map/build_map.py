@@ -312,6 +312,44 @@ for fn, nm in SIGN_FILES:
 lc = folium.LayerControl(collapsed=True)  # collapses to an icon; expands on hover
 lc.add_to(m)
 
+# Site header bar — matches the article page at /articles/june2026/ so navigation
+# is consistent across the site. A slim FIXED overlay across the top of the map
+# (Map / Article / Data); Leaflet's top controls are nudged down so the bar never
+# covers them. Pure CSS + links: no JS, no external assets (keeps SRI clean).
+m.get_root().header.add_child(folium.Element(
+    '''<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>&#x1F6B2;</text></svg>">'''
+))
+m.get_root().html.add_child(folium.Element("""
+<style>
+.wf-site-bar{position:fixed;top:0;left:0;right:0;z-index:1001;display:flex;
+  align-items:center;justify-content:space-between;gap:1rem;
+  padding:.6rem clamp(1rem,4vw,1.5rem);
+  font:15px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  background:rgba(255,255,255,.92);border-bottom:1px solid #e4e7ea;
+  -webkit-backdrop-filter:saturate(1.3) blur(8px);backdrop-filter:saturate(1.3) blur(8px)}
+.wf-site-bar .brand{color:#1b1d20;text-decoration:none;font-weight:700}
+.wf-site-bar nav{display:flex;gap:1.15rem}
+.wf-site-bar nav a{color:#5b6168;text-decoration:none}
+.wf-site-bar nav a:hover{color:#137a37}
+.wf-site-bar nav a[aria-current=page]{color:#137a37;font-weight:700}
+.leaflet-top{top:48px}
+@media (prefers-color-scheme:dark){
+  .wf-site-bar{background:rgba(20,23,26,.92);border-bottom-color:#2a2f34}
+  .wf-site-bar .brand{color:#e8eaed}
+  .wf-site-bar nav a{color:#9aa0a6}
+  .wf-site-bar nav a:hover,.wf-site-bar nav a[aria-current=page]{color:#5fcf83}
+}
+</style>
+<div class="wf-site-bar">
+  <a class="brand" href="./">Wake Forest Micromobility</a>
+  <nav>
+    <a href="./" aria-current="page">Map</a>
+    <a href="articles/june2026/">Article</a>
+    <a href="https://github.com/spinkham/wake_forest_micromobility">Data</a>
+  </nav>
+</div>
+"""))
+
 # The aerial imagery layer: serve the local NC 6-inch tile cache, and for any
 # tile we don't have (town edges, or everything when no cache is built) fall back
 # PER TILE to the live NC OneMap ImageServer (exportImage on that tile's bbox).
