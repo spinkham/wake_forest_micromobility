@@ -216,28 +216,25 @@ m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
 folium.TileLayer("CartoDB positron", name="CartoDB Positron",
                  overlay=False, control=True, max_native_zoom=20, max_zoom=22).add_to(m)
 
-# free aerial basemaps (choose in layer control). Esri World Imagery is omitted:
-# its terms + Maxar redistribution limits aren't clean for a public site.
-# aerial / alternate bases: show=False so only CartoDB is on the map at load
-# (folium adds every base layer to the map; without this the last one wins).
-folium.TileLayer(
-    "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}",
-    attr="USGS The National Map", name="Aerial — USGS Imagery",
-    overlay=False, control=True, show=False, max_native_zoom=16, max_zoom=22).add_to(m)
+# alternate street basemap (choose in layer control); show=False so only CartoDB
+# is on the map at load (folium adds every base layer to the map; without this
+# the last one wins). The only aerial imagery is the NC 6-inch layer wired in
+# below; redundant aerials (USGS, Esri World Imagery) are intentionally omitted.
 folium.TileLayer("OpenStreetMap", name="OpenStreetMap", overlay=False, control=True,
                  show=False, max_native_zoom=19, max_zoom=22).add_to(m)
 
-# locally built NC OneMap 6-inch tile cache (build_imagery_cache.py). Added only
-# if the cache exists; max_native_zoom=20 (native 6-inch) so it overzooms 20->22
-# on the client with no extra tiles and no hits on the live ImageServer. The URL
-# is relative to the saved HTML (repo root); tiles live under map/tiles/.
-# Local NC 6-inch tile cache is wired in below as a cache-first layer (injected
-# JS, after the layer control exists), so it can fall back per-tile to live
-# NC OneMap for tiles outside the town clip.
+# The sole aerial imagery layer is wired in below (injected JS, after the layer
+# control exists). It serves the locally built NC 6-inch tile cache
+# (build_imagery_cache.py; max_native_zoom=20 so it overzooms 20->22 client-side
+# with no extra tiles) and falls back PER TILE to the live NC OneMap ImageServer
+# for anything not cached -- town edges, or every tile when no cache is built --
+# so it works with or without a local cache. URL is relative to the saved HTML
+# (repo root); tiles live under map/tiles/.
 HAS_CACHE = os.path.isdir("tiles")
-print("imagery cache found: wiring cache-first NC 6-inch layer (map/tiles/ + NC OneMap fallback)"
+print("imagery cache present: serving map/tiles/ with per-tile NC OneMap fallback"
       if HAS_CACHE else
-      "no map/tiles/ cache: skipping local NC imagery layer (build it with build_imagery_cache.py)")
+      "no map/tiles/ cache: aerial layer pulls every tile live from NC OneMap "
+      "(build it with build_imagery_cache.py for fast local tiles)")
 
 folium.GeoJson(
     juris, name="Corporate limits",
@@ -315,40 +312,13 @@ for fn, nm in SIGN_FILES:
 lc = folium.LayerControl(collapsed=True)  # collapses to an icon; expands on hover
 lc.add_to(m)
 
-# NC OneMap 6-inch orthoimagery (dynamic ArcGIS ImageServer) via esri-leaflet,
-# loaded dynamically AFTER Leaflet exists so there is no script-order race.
+# The aerial imagery layer: serve the local NC 6-inch tile cache, and for any
+# tile we don't have (town edges, or everything when no cache is built) fall back
+# PER TILE to the live NC OneMap ImageServer (exportImage on that tile's bbox).
+# One selectable base layer, off by default. Always emitted -- with no local
+# cache every tile simply misses and is fetched live, degrading to pure NC OneMap
+# with no extra dependency (this replaces the old esri-leaflet ImageServer layer).
 m.get_root().html.add_child(folium.Element(f"""
-<script>
-(function() {{
-  function ready() {{ return window.L && typeof {m.get_name()} !== 'undefined'
-                       && typeof {lc.get_name()} !== 'undefined'; }}
-  function addNC() {{
-    var nc = L.esri.imageMapLayer({{
-      url: 'https://services.nconemap.gov/secure/rest/services/Imagery/Orthoimagery_Latest/ImageServer',
-      attribution: 'NC OneMap Orthoimagery (NC 911 Board)', maxZoom: 22
-    }});
-    {lc.get_name()}.addBaseLayer(nc, 'Aerial — NC OneMap orthos (6 in)');
-  }}
-  function go() {{
-    if (!ready()) {{ return setTimeout(go, 150); }}
-    if (window.L.esri) {{ return addNC(); }}
-    var s = document.createElement('script');
-    s.src = 'https://unpkg.com/esri-leaflet@3.1.0/dist/esri-leaflet.js';
-    s.integrity = 'sha384-mKRQp1R6awFM9WTPEGlZKBnRttP7Atg62pKG7fruF45ZRzyXYikoW7bqzPi7w6Ul';
-    s.crossOrigin = 'anonymous';
-    s.onload = addNC; document.head.appendChild(s);
-  }}
-  go();
-}})();
-</script>
-"""))
-
-# Cache-first NC 6-inch aerial: serve the local tile cache, and for any tile we
-# don't have (outside the town clip) fall back PER TILE to the live NC OneMap
-# ImageServer (exportImage on that tile's bbox). One selectable base layer,
-# off by default. Only emitted when the cache exists.
-if HAS_CACHE:
-    m.get_root().html.add_child(folium.Element(f"""
 <script>
 (function() {{
   function ready() {{ return window.L && typeof {m.get_name()} !== 'undefined'
@@ -383,7 +353,7 @@ if HAS_CACHE:
       minZoom: 12, maxNativeZoom: 20, maxZoom: 22,
       attribution: 'NC OneMap Orthoimagery (NC 911 Board)'
     }});
-    {lc.get_name()}.addBaseLayer(layer, 'Aerial — NC 6-inch (cached + NC OneMap fallback)');
+    {lc.get_name()}.addBaseLayer(layer, 'Aerial imagery (6 in)');
   }}
   add();
 }})();
@@ -395,7 +365,7 @@ m.get_root().html.add_child(folium.Element(f"""
 <script>
 (function add() {{
   if (typeof {m.get_name()} === 'undefined' || !{m.get_name()}.attributionControl) {{ return setTimeout(add, 150); }}
-  {m.get_name()}.attributionControl.addAttribution('Data: © OpenStreetMap contributors (ODbL) · Town of Wake Forest · NCDOT · NC OneMap · USGS');
+  {m.get_name()}.attributionControl.addAttribution('Data: © OpenStreetMap contributors (ODbL) · Town of Wake Forest · NCDOT · NC OneMap');
 }})();
 </script>
 """))
@@ -403,7 +373,7 @@ m.get_root().html.add_child(folium.Element(f"""
 # rule-interpretation checkbox — rendered INSIDE the layer-control box (below the
 # layers, after a divider). Flips permissive/strict and restyles the reachability
 # + >25 / proposed bike-lane layers via setStyle. Re-inserted after any list
-# rebuild (e.g. when the NC-orthos base layer is added) so it isn't wiped.
+# rebuild (e.g. when the aerial-imagery base layer is added) so it isn't wiped.
 m.get_root().html.add_child(folium.Element(f"""
 <script>
 (function() {{
@@ -497,8 +467,7 @@ m.save(out)
 # Subresource Integrity: pin every third-party CDN asset folium emits (scripts +
 # styles) so a CDN compromise can't inject code or styling into the page. Hashes
 # are sha384 of the exact uncompressed bytes of these version-pinned URLs;
-# crossorigin is required for SRI and all these CDNs send CORS. The dynamically
-# loaded esri-leaflet is pinned in its injected loader above. Any external
+# crossorigin is required for SRI and all these CDNs send CORS. Any external
 # subresource without a known hash is flagged (e.g. if a folium upgrade bumps a
 # version) but left untouched -- fail-open, never silently broken.
 SRI = {
@@ -533,7 +502,7 @@ for mt in re.finditer(r'<(?:script|link)\b[^>]*?(?:src|href)="(https://[^"]+)"[^
     if "integrity=" not in mt.group(0):
         print("  SRI WARNING: external subresource without integrity:", mt.group(1))
 open(out, "w", encoding="utf-8").write(html)
-print("saved", out, f"(SRI pinned: {len(SRI)} CDN assets + esri-leaflet)")
+print("saved", out, f"(SRI pinned: {len(SRI)} CDN assets)")
 print("\n=== category stats (features, miles) ===")
 for n, (cnt, mi) in stats.items():
     print(f"  {n:42s} {cnt:5d} feats  {mi:7.1f} mi")
