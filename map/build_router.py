@@ -88,6 +88,20 @@ m.get_root().html.add_child(folium.Element("""
   .wf-site-bar .brand{color:#e8eaed}
   .wf-site-bar nav a{color:#9aa0a6}
   .wf-site-bar nav a:hover,.wf-site-bar nav a[aria-current=page]{color:#5fcf83}
+  /* Leaflet's own controls (zoom, layers box, scale, attribution) ship
+     hard-coded white/black -- retheme them to match the rest of the page. */
+  .leaflet-control-zoom a,.leaflet-control-layers,.leaflet-bar a,
+  .leaflet-control-attribution,.leaflet-control-scale-line{
+    background:#26292c !important;color:#e8eaed !important;border-color:#444 !important}
+  .leaflet-control-attribution a{color:#8ab4f8 !important}
+  .leaflet-control-layers-toggle{filter:invert(1) hue-rotate(180deg)}
+  .leaflet-control-layers-separator{border-top-color:#444 !important}
+  /* The basemap tiles (Positron/OSM) are flat raster images -- CSS can't
+     restyle them directly, so invert+rehue the tile pane to fake a dark
+     basemap. Scoped off whenever the aerial imagery layer is active (a
+     photograph inverted looks broken, not "dark mode"); see the toggle
+     script below. */
+  .leaflet-tile-pane.wf-dark-invert{filter:invert(1) hue-rotate(180deg) brightness(.95) contrast(.9)}
 }
 </style>
 <div class="wf-site-bar">
@@ -99,6 +113,31 @@ m.get_root().html.add_child(folium.Element("""
     <a href="https://github.com/spinkham/wake_forest_micromobility">Data</a>
   </nav>
 </div>
+"""))
+
+# Basemap-invert toggle: keeps .wf-dark-invert (defined above, scoped to
+# prefers-color-scheme:dark) off whenever the active base layer is the aerial
+# photograph, and re-syncs if the OS theme flips while the tab is open.
+m.get_root().html.add_child(folium.Element(f"""
+<script>
+(function() {{
+  var mq = window.matchMedia('(prefers-color-scheme: dark)');
+  var current = 'CartoDB Positron';
+  function apply() {{
+    var pane = document.querySelector('.leaflet-tile-pane');
+    if (!pane) return;
+    pane.classList.toggle('wf-dark-invert', mq.matches && current.indexOf('Aerial') === -1);
+  }}
+  function ready() {{ return typeof {m.get_name()} !== 'undefined'; }}
+  function init() {{
+    if (!ready()) {{ return setTimeout(init, 150); }}
+    {m.get_name()}.on('baselayerchange', function(e) {{ current = e.name; apply(); }});
+    mq.addEventListener('change', apply);
+    apply();
+  }}
+  init();
+}})();
+</script>
 """))
 
 # The aerial imagery layer: identical to build_map.py -- serve the local NC
@@ -157,20 +196,20 @@ m.get_root().html.add_child(folium.Element(f"""
 
 # ---- routing control panel (HTML/CSS) ------------------------------------
 panel_html = """
-<div id="wf-panel" style="position:fixed;top:60px;left:16px;z-index:9999;background:#fff;
-padding:10px 14px;border:1px solid #999;border-radius:6px;font:13px/1.5 sans-serif;
+<div id="wf-panel" style="position:fixed;top:60px;left:16px;z-index:9999;
+padding:10px 14px;border-radius:6px;font:13px/1.5 sans-serif;
 box-shadow:0 1px 5px rgba(0,0,0,.3);width:290px;max-height:calc(100vh - 90px);overflow-y:auto">
 <div style="font-weight:700;cursor:pointer;user-select:none" title="click to collapse / expand"
  onclick="var b=document.getElementById('wf-panel-body'),t=document.getElementById('wf-panel-tog'),h=b.style.display==='none';b.style.display=h?'block':'none';t.textContent=h?'▾':'▸';">
 <span id="wf-panel-tog">▾</span> Bike route planner</div>
 <div id="wf-panel-body" style="margin-top:8px">
-<div style="color:#555;font-size:11.5px;margin-bottom:8px">Click the map (or search) to set
+<div class="wf-desc" style="font-size:11.5px;margin-bottom:8px">Click the map (or search) to set
 start &amp; end -- drag pins to adjust. Click into a field below to re-target it.</div>
 <div class="wf-row" id="wfStartRow"><span class="wf-dot" style="background:#1a9641"></span>
   <input id="wfStartAddr" placeholder="Start address"><button id="wfStartGo">Go</button></div>
 <div class="wf-row" id="wfEndRow"><span class="wf-dot" style="background:#d7191c"></span>
   <input id="wfEndAddr" placeholder="End address"><button id="wfEndGo">Go</button></div>
-<div id="wfPlacingHint" style="color:#888;font-size:11px;margin:4px 0 8px">
+<div id="wfPlacingHint" class="wf-hint" style="font-size:11px;margin:4px 0 8px">
   Next map click sets: <b id="wfPlacingWho">start</b></div>
 <div style="margin-bottom:4px"><b style="font-size:11.5px">Routing rule</b></div>
 <div style="margin-bottom:2px">
@@ -180,19 +219,20 @@ start &amp; end -- drag pins to adjust. Click into a field below to re-target it
   &nbsp;&nbsp;
   <label style="cursor:pointer"><input type="radio" name="wfTier" value="least_unsafe"> Least-unsafe</label>
 </div>
-<div id="wfTierNote" style="color:#888;font-size:11px;margin:2px 0 8px"></div>
+<div id="wfTierNote" class="wf-hint" style="font-size:11px;margin:2px 0 8px"></div>
 <div style="margin-bottom:8px">
   <label style="cursor:pointer"><input type="radio" name="wfMode" value="shortest" checked> Shortest</label>
   &nbsp;&nbsp;
   <label style="cursor:pointer"><input type="radio" name="wfMode" value="comfortable"> Most comfortable</label>
 </div>
 <button id="wfClear">Clear route</button>
-<div id="wfStatus" style="color:#a33;font-size:11.5px;margin-top:6px"></div>
+<div id="wfStatus" class="wf-status" style="font-size:11.5px;margin-top:6px"></div>
 <hr style="margin:10px 0">
 <div id="wfResults" style="font-size:12.5px">Set a start and end point to see a route.</div>
 </div>
 </div>
 <style>
+#wf-panel{background:#fff;border:1px solid #999}
 #wf-panel .wf-row{display:flex;align-items:center;gap:6px;margin-bottom:5px}
 #wf-panel .wf-dot{display:inline-block;width:10px;height:10px;border-radius:50%;flex:none}
 #wf-panel input{flex:1;min-width:0;padding:3px 5px;border:1px solid #ccc;border-radius:4px;font:inherit;
@@ -203,6 +243,9 @@ start &amp; end -- drag pins to adjust. Click into a field below to re-target it
 #wf-panel button{padding:3px 8px;border:1px solid #999;border-radius:4px;background:#f4f4f4;
   cursor:pointer;font:inherit}
 #wf-panel button:hover{background:#e8e8e8}
+.wf-desc{color:#555}
+.wf-hint{color:#888}
+.wf-status{color:#a33}
 .wf-bd-row{display:flex;align-items:center;gap:6px;margin:2px 0}
 .wf-bd-sw{display:inline-block;width:14px;height:4px;border-radius:2px;flex:none}
 .wf-dist{margin-bottom:6px}
@@ -219,7 +262,10 @@ start &amp; end -- drag pins to adjust. Click into a field below to re-target it
   #wf-panel input{background:#26292c;color:#e8eaed;border-color:#444}
   #wf-panel button{background:#2a2e32;color:#e8eaed;border-color:#555}
   #wf-panel button:hover{background:#33383d}
-  .wf-cur{border-top-color:#444}
+  .wf-desc,.wf-hint{color:#9aa0a6}
+  .wf-status,.wf-cur-bad,.wf-unsafe-note{color:#e07a7a}
+  .wf-sw-note{color:#e0a95a}
+  .wf-cur{border-top-color:#444;color:#c7cace}
 }
 </style>
 """
