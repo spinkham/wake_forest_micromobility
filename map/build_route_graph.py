@@ -70,6 +70,31 @@ if _swbuf_all is not None:
 edges["is_freeway"] = edges["hw"].isin(FREEWAY)
 edges["is_path"] = edges["hw"].isin(("cycleway", "path"))
 
+# ---- greenway-as-footway: some of the town's own paved, shared-use greenway
+# trails are tagged highway=footway in OSM instead of cycleway/path (e.g.
+# "Kiwanis Greenway" and "Dunn Creek Greenway" -- confirmed via the Town's own
+# GIS as 8-10 ft paved, Completed facilities, not narrow hiking paths). A
+# plain highway=footway is excluded everywhere (NONRIDE) since most footways
+# really are pedestrian-only sidewalks -- but that wrongly treats a real,
+# named, town-built greenway the same as a random sidewalk, forcing detours
+# around perfectly rideable trail. Cross-reference footways against the
+# Town's authoritative greenways.geojson + mup.geojson (the same source
+# build_map.py already trusts for its "permitted" greenway/MUP layers): a
+# footway that substantially coincides with a mapped greenway/MUP is treated
+# as a path, everywhere, same as a cycleway.
+_gw_official = gpd.read_file("greenways.geojson")
+_mup_official = gpd.read_file("mup.geojson")
+_gw_buf = unary_union(pd.concat([_gw_official, _mup_official])[["geometry"]]
+                       .to_crs(PROJ).geometry.buffer(15).values)
+_foot_cand = edges["hw"].isin(("footway", "pedestrian"))
+edges["is_greenway_footway"] = False
+edges.loc[_foot_cand, "is_greenway_footway"] = _ep.loc[edges[_foot_cand].index, "geometry"].apply(
+    lambda g: g.intersection(_gw_buf).length >= 0.5 * g.length).values
+edges["is_path"] = edges["is_path"] | edges["is_greenway_footway"]
+print(f"footway segments reclassified as rideable greenway/path (matched "
+      f"Town GIS): {edges['is_greenway_footway'].sum()} edges, "
+      f"{edges.loc[edges['is_greenway_footway'], 'len_mi'].sum():.1f} mi")
+
 # ---- parking lots: OSM tags parking-lot driving aisles and lot-entrance
 # driveways as highway=service (service=parking_aisle / driveway / alley /
 # drive-through), which build_islands.py's own NONRIDE excludes wholesale --
@@ -111,7 +136,8 @@ _legal_outside = (~edges["intown"]) & (edges["speed"] <= 45) & (~edges["is_freew
 _legal = edges["is_path"] | edges["bikelane"] | (edges["speed"] <= 25) \
     | edges["sidewalk_safe"] | _legal_outside
 _least_unsafe_extra = (edges["speed"] > 25) & (edges["speed"] < 45) & (~edges["is_freeway"])
-_blocked = edges["hw"].isin(NONRIDE_STRICT) | (_is_service & ~edges["is_lot"])
+_blocked = (edges["hw"].isin(NONRIDE_STRICT) & ~edges["is_greenway_footway"]) \
+    | (_is_service & ~edges["is_lot"])
 edges["trav_master"] = (~_blocked) & (_legal | _least_unsafe_extra)
 # (footway/steps/pedestrian/construction/proposed/track, plus private/no-
 # access service roads, are never rideable in any tier.)
