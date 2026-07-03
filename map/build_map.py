@@ -339,8 +339,27 @@ lc.add_to(m)
 m.get_root().header.add_child(folium.Element(
     '''<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>&#x1F6B2;</text></svg>">'''
 ))
+# Theme bootstrap: runs synchronously in <head>, before the (large) body
+# paints, so there's no flash of the wrong theme. Manual choice (localStorage)
+# wins; absent that, follows the OS preference live via the media-query
+# listener. .wf-dark on <html> is the single source of truth every dark-mode
+# rule below keys off.
+m.get_root().header.add_child(folium.Element("""
+<script>
+(function() {
+  try {
+    var stored = localStorage.getItem('wfTheme');
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    function apply(dark) { document.documentElement.classList.toggle('wf-dark', dark); }
+    apply(stored ? stored === 'dark' : mq.matches);
+    if (!stored) { mq.addEventListener('change', function(e) { apply(e.matches); }); }
+  } catch (e) {}
+})();
+</script>
+"""))
 m.get_root().html.add_child(folium.Element("""
 <style>
+:root.wf-dark{color-scheme:dark}
 .wf-site-bar{position:fixed;top:0;left:0;right:0;z-index:1001;display:flex;
   align-items:center;justify-content:space-between;gap:1rem;
   padding:.6rem clamp(1rem,4vw,1.5rem);
@@ -348,37 +367,45 @@ m.get_root().html.add_child(folium.Element("""
   background:rgba(255,255,255,.92);border-bottom:1px solid #e4e7ea;
   -webkit-backdrop-filter:saturate(1.3) blur(8px);backdrop-filter:saturate(1.3) blur(8px)}
 .wf-site-bar .brand{color:#1b1d20;text-decoration:none;font-weight:700}
-.wf-site-bar nav{display:flex;gap:1.15rem}
+.wf-site-bar nav{display:flex;align-items:center;gap:1.15rem}
 .wf-site-bar nav a{color:#5b6168;text-decoration:none}
 .wf-site-bar nav a:hover{color:#137a37}
 .wf-site-bar nav a[aria-current=page]{color:#137a37;font-weight:700}
+.wf-theme-toggle{background:none;border:1px solid #ccd0d4;border-radius:5px;cursor:pointer;
+  font-size:14px;line-height:1;padding:4px 7px;color:#5b6168}
+.wf-theme-toggle:hover{border-color:#9aa0a6}
+.wf-theme-toggle .wf-icon-sun{display:none}
 .leaflet-top{top:48px}
-@media (prefers-color-scheme:dark){
-  .wf-site-bar{background:rgba(20,23,26,.92);border-bottom-color:#2a2f34}
-  .wf-site-bar .brand{color:#e8eaed}
-  .wf-site-bar nav a{color:#9aa0a6}
-  .wf-site-bar nav a:hover,.wf-site-bar nav a[aria-current=page]{color:#5fcf83}
-  /* Leaflet's own controls (zoom, layers box, scale, attribution) ship
-     hard-coded white/black -- retheme them to match the rest of the page. */
-  .leaflet-control-zoom a,.leaflet-control-layers,.leaflet-bar a,
-  .leaflet-control-attribution,.leaflet-control-scale-line{
-    background:#26292c !important;color:#e8eaed !important;border-color:#444 !important}
-  .leaflet-control-attribution a{color:#8ab4f8 !important}
-  .leaflet-control-layers-toggle{filter:invert(1) hue-rotate(180deg)}
-  .leaflet-control-layers-separator{border-top-color:#444 !important}
-  .wf-interp{color:#e8eaed}
-  .wf-interp-hr{border-top-color:#444 !important}
-  .wf-interp-note{color:#9aa0a6 !important}
-  /* The basemap tiles (Positron/OSM) are flat raster images -- CSS can't
-     restyle them directly, so invert+rehue the tile pane to fake a dark
-     basemap. Scoped off whenever the aerial imagery layer is active (a
-     photograph inverted looks broken, not "dark mode"); see the toggle
-     script below. The container's own background (visible through any gap
-     before a tile has painted in -- panning, zooming, or just slow network)
-     is set dark too, so those gaps don't flash white against everything else. */
-  .leaflet-container.wf-dark-invert{background:#0e0f10}
-  .leaflet-container.wf-dark-invert .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.95) contrast(.9)}
-}
+.wf-dark .wf-site-bar{background:rgba(20,23,26,.92);border-bottom-color:#2a2f34}
+.wf-dark .wf-site-bar .brand{color:#e8eaed}
+.wf-dark .wf-site-bar nav a{color:#9aa0a6}
+.wf-dark .wf-site-bar nav a:hover,.wf-dark .wf-site-bar nav a[aria-current=page]{color:#5fcf83}
+.wf-dark .wf-theme-toggle{border-color:#444;color:#e8eaed}
+.wf-dark .wf-theme-toggle:hover{border-color:#5fcf83}
+.wf-dark .wf-theme-toggle .wf-icon-moon{display:none}
+.wf-dark .wf-theme-toggle .wf-icon-sun{display:inline}
+/* Leaflet's own controls (zoom, layers box, scale, attribution) ship
+   hard-coded white/black -- retheme them to match the rest of the page. */
+.wf-dark .leaflet-control-zoom a,.wf-dark .leaflet-control-layers,.wf-dark .leaflet-bar a,
+.wf-dark .leaflet-control-attribution,.wf-dark .leaflet-control-scale-line{
+  background:#26292c !important;color:#e8eaed !important;border-color:#444 !important}
+.wf-dark .leaflet-control-attribution a{color:#8ab4f8 !important}
+.wf-dark .leaflet-control-layers-toggle{filter:invert(1) hue-rotate(180deg)}
+.wf-dark .leaflet-control-layers-separator{border-top-color:#444 !important}
+.wf-dark .wf-interp{color:#e8eaed}
+.wf-dark .wf-interp-hr{border-top-color:#444 !important}
+.wf-dark .wf-interp-note{color:#9aa0a6 !important}
+/* The basemap tiles (Positron/OSM) are flat raster images -- CSS can't
+   restyle them directly, so invert+rehue the tile pane to fake a dark
+   basemap. Scoped off whenever the aerial imagery layer is active (a
+   photograph inverted looks broken, not "dark mode"); see the toggle
+   script below. The container's own background (visible through any gap
+   before a tile has painted in -- panning, zooming, or just slow network)
+   is set dark too, so those gaps don't flash white against everything else.
+   Gated on .wf-dark-invert (JS-computed: dark mode AND not the aerial
+   layer), not .wf-dark directly, so it stays correctly scoped. */
+.leaflet-container.wf-dark-invert{background:#0e0f10}
+.leaflet-container.wf-dark-invert .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.95) contrast(.9)}
 </style>
 <div class="wf-site-bar">
   <a class="brand" href="./">Wake Forest Micromobility</a>
@@ -387,28 +414,38 @@ m.get_root().html.add_child(folium.Element("""
     <a href="wake-forest-router.html">Route</a>
     <a href="articles/june2026/">Article</a>
     <a href="https://github.com/spinkham/wake_forest_micromobility">Data</a>
+    <button id="wfThemeToggle" class="wf-theme-toggle" type="button"
+     title="Toggle dark / light theme" aria-label="Toggle dark / light theme"
+     onclick="var h=document.documentElement,d=!h.classList.contains('wf-dark');
+       h.classList.toggle('wf-dark',d);try{localStorage.setItem('wfTheme',d?'dark':'light')}catch(e){}">
+      <span class="wf-icon-moon">&#x1F319;</span><span class="wf-icon-sun">&#x2600;&#xFE0F;</span>
+    </button>
   </nav>
 </div>
 """))
 
-# Basemap-invert toggle: keeps .wf-dark-invert (defined above, scoped to
-# prefers-color-scheme:dark) off whenever the active base layer is the aerial
-# photograph, and re-syncs if the OS theme flips while the tab is open.
+# Basemap-invert toggle: keeps .wf-dark-invert (background on the container,
+# invert filter on the tile pane -- see the stylesheet above) off whenever
+# the active base layer is the aerial photograph. Reacts to the theme-toggle
+# button too, via a MutationObserver on <html class> -- that's the same
+# attribute the header bootstrap script and the toggle button both write to,
+# so this one observer covers "OS preference changed" and "user clicked the
+# toggle" without the two scripts needing to know about each other.
 m.get_root().html.add_child(folium.Element(f"""
 <script>
 (function() {{
-  var mq = window.matchMedia('(prefers-color-scheme: dark)');
   var current = 'CartoDB Positron';
   function apply() {{
     var el = document.querySelector('.leaflet-container');
     if (!el) return;
-    el.classList.toggle('wf-dark-invert', mq.matches && current.indexOf('Aerial') === -1);
+    var dark = document.documentElement.classList.contains('wf-dark');
+    el.classList.toggle('wf-dark-invert', dark && current.indexOf('Aerial') === -1);
   }}
   function ready() {{ return typeof {m.get_name()} !== 'undefined'; }}
   function init() {{
     if (!ready()) {{ return setTimeout(init, 150); }}
     {m.get_name()}.on('baselayerchange', function(e) {{ current = e.name; apply(); }});
-    mq.addEventListener('change', apply);
+    new MutationObserver(apply).observe(document.documentElement, {{attributes: true, attributeFilter: ['class']}});
     apply();
   }}
   init();
@@ -548,12 +585,10 @@ legend = f"""
 #wf-legend{{background:#fff;border:1px solid #999}}
 .wf-legend-summary{{color:#555}}
 .wf-legend-note{{color:#888}}
-@media (prefers-color-scheme:dark){{
-  #wf-legend{{background:#1a1d20;border-color:#3a3f44;color:#e8eaed}}
-  #wf-legend hr{{border-top-color:#444}}
-  .wf-legend-summary{{color:#c7cace}}
-  .wf-legend-note{{color:#9aa0a6}}
-}}
+.wf-dark #wf-legend{{background:#1a1d20;border-color:#3a3f44;color:#e8eaed}}
+.wf-dark #wf-legend hr{{border-top-color:#444}}
+.wf-dark .wf-legend-summary{{color:#c7cace}}
+.wf-dark .wf-legend-note{{color:#9aa0a6}}
 </style>
 <div id="wf-legend" style="position:fixed;bottom:24px;left:24px;z-index:9999;
 padding:8px 12px;border-radius:6px;font:12px/1.5 sans-serif;
