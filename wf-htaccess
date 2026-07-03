@@ -1,0 +1,44 @@
+# Serve pre-compressed static assets (Brotli) instead of compressing 10 MB of
+# JSON on every single request. Sidecars are built by map/compress_deploy.py
+# (foo.json.br alongside foo.json). Falls through to on-the-fly gzip (for any
+# client that doesn't send "br"), then to the plain original if neither is
+# supported.
+#
+# Brotli only, no gzip sidecar: relies on Apache's classic mod_mime
+# double-extension convention (foo.json.br -> type application/json from
+# .json, encoding br from our AddEncoding below) -- but /etc/mime.types
+# (root-owned, can't edit without root) ALSO registers .gz as a real type
+# (application/gzip), which conflicts with using it purely as an encoding
+# suffix and makes Apache emit the wrong Content-Type for a .gz sidecar.
+# Brotli has no such conflict (.br isn't a pre-registered type) and covers
+# the overwhelming majority of real traffic; mod_deflate (already enabled)
+# covers everything else via on-the-fly gzip, just without a pre-computed
+# sidecar for that shrinking minority.
+#
+# Needs only mod_rewrite + mod_mime, both already enabled server-wide -- no
+# root, no new modules, no server restart.
+RewriteEngine On
+
+AddEncoding br .br
+AddType application/json .json
+
+# the directory-index case (a request for "/" resolving to index.html) --
+# must be handled separately, since REQUEST_FILENAME at this point is the
+# directory itself, not index.html, and DirectoryIndex resolution happens
+# after per-directory rewriting.
+RewriteCond %{HTTP:Accept-Encoding} br
+RewriteCond %{DOCUMENT_ROOT}%{REQUEST_URI}index.html.br -f
+RewriteRule ^$ index.html.br [L,E=no-gzip:1]
+
+# the general case (any other file requested directly, e.g. wf-route-graph.json)
+RewriteCond %{HTTP:Accept-Encoding} br
+RewriteCond %{REQUEST_FILENAME}.br -f
+RewriteRule ^(.+)$ $1.br [L,E=no-gzip:1]
+
+# Blanket on-the-fly gzip fallback for non-Brotli clients, and for anything
+# not pre-compressed above (mod_deflate is already enabled server-wide, but
+# its default type list only covers text/html, text/css, text/javascript etc
+# -- not JSON).
+<IfModule mod_filter.c>
+  AddOutputFilterByType DEFLATE application/json
+</IfModule>

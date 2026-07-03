@@ -344,6 +344,7 @@ m.get_root().html.add_child(folium.Element("""
   <a class="brand" href="./">Wake Forest Micromobility</a>
   <nav>
     <a href="./" aria-current="page">Map</a>
+    <a href="wake-forest-router.html">Route</a>
     <a href="articles/june2026/">Article</a>
     <a href="https://github.com/spinkham/wake_forest_micromobility">Data</a>
   </nav>

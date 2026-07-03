@@ -23,5 +23,9 @@ map/*.log
 # Imagery tile cache built by build_imagery_cache.py (large; not committed)
 map/tiles/
 
+# Pre-compressed deploy sidecars (regenerate with map/compress_deploy.py)
+*.br
+*.gz
+
 # WebP/AVIF quality comparison tool (sample tiles + page)
 qcompare/
