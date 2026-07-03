@@ -128,10 +128,30 @@ def edge_speed(row):
 
 osm["speed"] = osm.apply(edge_speed, axis=1)
 
+# Some of the town's own paved, shared-use greenway trails are tagged
+# highway=footway in OSM instead of cycleway/path (e.g. Kiwanis Greenway,
+# Dunn Creek Greenway -- confirmed via the Town's own GIS as 8-10 ft paved,
+# Completed facilities, not narrow hiking paths). A plain footway is
+# GATED here (right for an actual sidewalk), but that wrongly gates a real,
+# named, town-built greenway too. Cross-reference footways against the
+# Town's own greenways/mup layers (already loaded above as gw/mup): a
+# footway that substantially coincides with a mapped greenway/MUP is
+# EXCLUDED from the OSM-derived categories below (not reclassified as
+# "bikelane") -- the dedicated Greenways/MUP layers already draw and count
+# its real mileage from the Town's own data, so counting it again here
+# would double it in the map and in the legend's permitted-mileage total.
+_gw_buf = unary_union(pd.concat([gw, mup])[["geometry"]].to_crs(PROJ).geometry.buffer(15).values)
+_foot_cand = osm["hw"].isin(("footway", "pedestrian"))
+osm["is_greenway_footway"] = False
+osm.loc[_foot_cand, "is_greenway_footway"] = osm.loc[_foot_cand].to_crs(PROJ).geometry.apply(
+    lambda g: g.intersection(_gw_buf).length >= 0.5 * g.length).values
+
 
 def categorize(row):
     if not row["in_town"]:
         return "outside", None
+    if row["is_greenway_footway"]:
+        return None, None
     hw = row["hw"]
     if hw in ("footway", "steps", "pedestrian"):
         return "sidewalk_gated", None

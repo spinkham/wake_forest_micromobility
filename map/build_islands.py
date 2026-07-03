@@ -98,8 +98,33 @@ bl_buf = unary_union(bl_ex.geometry.buffer(18).values)
 edges["bikelane"] = edges.to_crs(PROJ).geometry.representative_point().within(bl_buf) & roadmask
 
 
+# Some of the town's own paved, shared-use greenway trails are tagged
+# highway=footway in OSM instead of cycleway/path (e.g. Kiwanis Greenway,
+# Dunn Creek Greenway -- confirmed via the Town's own GIS as 8-10 ft paved,
+# Completed facilities, not narrow hiking paths). A plain footway is
+# NONRIDE (right for an actual sidewalk), but that wrongly gates a real,
+# named, town-built greenway too. Cross-reference footways against the
+# Town's authoritative greenways.geojson + mup.geojson: a footway that
+# substantially coincides with a mapped greenway/MUP is treated as
+# permitted, same as a cycleway.
+_gw_official = gpd.read_file("greenways.geojson")
+_mup_official = gpd.read_file("mup.geojson")
+_gw_buf = unary_union(pd.concat([_gw_official, _mup_official])[["geometry"]]
+                       .to_crs(PROJ).geometry.buffer(15).values)
+_foot_cand = edges["hw"].isin(("footway", "pedestrian"))
+_ep_pre = edges.to_crs(PROJ)
+edges["is_greenway_footway"] = False
+edges.loc[_foot_cand, "is_greenway_footway"] = _ep_pre.loc[edges[_foot_cand].index, "geometry"].apply(
+    lambda g: g.intersection(_gw_buf).length >= 0.5 * g.length).values
+print(f"footway segments reclassified as permitted greenway/path (matched "
+      f"Town GIS): {edges['is_greenway_footway'].sum()} edges, "
+      f"{edges.loc[edges['is_greenway_footway'], 'len_mi'].sum():.1f} mi")
+
+
 def traversable(r, mode):
     hw = r["hw"]
+    if r["is_greenway_footway"]:
+        return True
     if hw in NONRIDE:
         return False
     if hw in ("cycleway", "path"):

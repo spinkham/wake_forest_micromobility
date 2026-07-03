@@ -18,7 +18,7 @@ much of the network that reconnects.
 - Under the rules as written, about **58 percent** of the town's streets are
   reachable by bike as one connected network.
 - Allowing bikes on the sidewalks of roads over 25 mph (where there is no bike
-  lane) raises that to about **85 percent**.
+  lane) raises that to about **88 percent**.
 - Reachability is computed as the largest connected component a rider can travel
   without using a barred road or sidewalk. Stranded "islands" are street segments
   that are rideable in isolation but cut off from the main network by fast roads.
