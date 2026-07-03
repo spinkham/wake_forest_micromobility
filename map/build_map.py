@@ -373,8 +373,11 @@ m.get_root().html.add_child(folium.Element("""
      restyle them directly, so invert+rehue the tile pane to fake a dark
      basemap. Scoped off whenever the aerial imagery layer is active (a
      photograph inverted looks broken, not "dark mode"); see the toggle
-     script below. */
-  .leaflet-tile-pane.wf-dark-invert{filter:invert(1) hue-rotate(180deg) brightness(.95) contrast(.9)}
+     script below. The container's own background (visible through any gap
+     before a tile has painted in -- panning, zooming, or just slow network)
+     is set dark too, so those gaps don't flash white against everything else. */
+  .leaflet-container.wf-dark-invert{background:#0e0f10}
+  .leaflet-container.wf-dark-invert .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.95) contrast(.9)}
 }
 </style>
 <div class="wf-site-bar">
@@ -397,9 +400,9 @@ m.get_root().html.add_child(folium.Element(f"""
   var mq = window.matchMedia('(prefers-color-scheme: dark)');
   var current = 'CartoDB Positron';
   function apply() {{
-    var pane = document.querySelector('.leaflet-tile-pane');
-    if (!pane) return;
-    pane.classList.toggle('wf-dark-invert', mq.matches && current.indexOf('Aerial') === -1);
+    var el = document.querySelector('.leaflet-container');
+    if (!el) return;
+    el.classList.toggle('wf-dark-invert', mq.matches && current.indexOf('Aerial') === -1);
   }}
   function ready() {{ return typeof {m.get_name()} !== 'undefined'; }}
   function init() {{
