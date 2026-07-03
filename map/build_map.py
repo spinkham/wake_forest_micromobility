@@ -358,6 +358,23 @@ m.get_root().html.add_child(folium.Element("""
   .wf-site-bar .brand{color:#e8eaed}
   .wf-site-bar nav a{color:#9aa0a6}
   .wf-site-bar nav a:hover,.wf-site-bar nav a[aria-current=page]{color:#5fcf83}
+  /* Leaflet's own controls (zoom, layers box, scale, attribution) ship
+     hard-coded white/black -- retheme them to match the rest of the page. */
+  .leaflet-control-zoom a,.leaflet-control-layers,.leaflet-bar a,
+  .leaflet-control-attribution,.leaflet-control-scale-line{
+    background:#26292c !important;color:#e8eaed !important;border-color:#444 !important}
+  .leaflet-control-attribution a{color:#8ab4f8 !important}
+  .leaflet-control-layers-toggle{filter:invert(1) hue-rotate(180deg)}
+  .leaflet-control-layers-separator{border-top-color:#444 !important}
+  .wf-interp{color:#e8eaed}
+  .wf-interp-hr{border-top-color:#444 !important}
+  .wf-interp-note{color:#9aa0a6 !important}
+  /* The basemap tiles (Positron/OSM) are flat raster images -- CSS can't
+     restyle them directly, so invert+rehue the tile pane to fake a dark
+     basemap. Scoped off whenever the aerial imagery layer is active (a
+     photograph inverted looks broken, not "dark mode"); see the toggle
+     script below. */
+  .leaflet-tile-pane.wf-dark-invert{filter:invert(1) hue-rotate(180deg) brightness(.95) contrast(.9)}
 }
 </style>
 <div class="wf-site-bar">
@@ -369,6 +386,31 @@ m.get_root().html.add_child(folium.Element("""
     <a href="https://github.com/spinkham/wake_forest_micromobility">Data</a>
   </nav>
 </div>
+"""))
+
+# Basemap-invert toggle: keeps .wf-dark-invert (defined above, scoped to
+# prefers-color-scheme:dark) off whenever the active base layer is the aerial
+# photograph, and re-syncs if the OS theme flips while the tab is open.
+m.get_root().html.add_child(folium.Element(f"""
+<script>
+(function() {{
+  var mq = window.matchMedia('(prefers-color-scheme: dark)');
+  var current = 'CartoDB Positron';
+  function apply() {{
+    var pane = document.querySelector('.leaflet-tile-pane');
+    if (!pane) return;
+    pane.classList.toggle('wf-dark-invert', mq.matches && current.indexOf('Aerial') === -1);
+  }}
+  function ready() {{ return typeof {m.get_name()} !== 'undefined'; }}
+  function init() {{
+    if (!ready()) {{ return setTimeout(init, 150); }}
+    {m.get_name()}.on('baselayerchange', function(e) {{ current = e.name; apply(); }});
+    mq.addEventListener('change', apply);
+    apply();
+  }}
+  init();
+}})();
+</script>
 """))
 
 # The aerial imagery layer: serve the local NC 6-inch tile cache, and for any
@@ -469,11 +511,11 @@ m.get_root().html.add_child(folium.Element(f"""
       var list = LC.getContainer().querySelector('.leaflet-control-layers-list');
       if (!list || list.querySelector('#interpChk')) return;
       var sec = L.DomUtil.create('div', 'wf-interp', list);
-      sec.innerHTML = '<div style="border-top:1px solid #bbb;margin:7px 0 5px"></div>' +
+      sec.innerHTML = '<div class="wf-interp-hr" style="border-top:1px solid #bbb;margin:7px 0 5px"></div>' +
         '<label style="cursor:pointer;display:block"><input type="checkbox" id="interpChk"' + (PERM ? ' checked' : '') + '> <b>Bike lanes count on &gt;25&nbsp;mph roads</b></label>' +
-        '<div style="color:#888;font-size:10px;margin:2px 0 5px 2px">rule interpretation — affects reachability &amp; bike-lane layers</div>' +
+        '<div class="wf-interp-note" style="color:#888;font-size:10px;margin:2px 0 5px 2px">rule interpretation — affects reachability &amp; bike-lane layers</div>' +
         '<label style="cursor:pointer;display:block"><input type="checkbox" id="swChk"' + (SW ? ' checked' : '') + '> <b>Sidewalks usable on &gt;25&nbsp;mph roads (no bike lane)</b></label>' +
-        '<div style="color:#888;font-size:10px;margin:2px 0 0 2px">reachability only — reconnects ~69% of otherwise-stranded miles</div>';
+        '<div class="wf-interp-note" style="color:#888;font-size:10px;margin:2px 0 0 2px">reachability only — reconnects ~69% of otherwise-stranded miles</div>';
       L.DomEvent.disableClickPropagation(sec);
       list.querySelector('#interpChk').addEventListener('change', function(e) {{ PERM = e.target.checked; apply(); }});
       list.querySelector('#swChk').addEventListener('change', function(e) {{ SW = e.target.checked; apply(); }});
@@ -499,8 +541,19 @@ rows = "".join(
     f'{n.split(" — ")[0]} <b>{stats[n][1]} mi</b></div>'
     for (g, n, c, w, d, o) in LAYERS)
 legend = f"""
-<div id="wf-legend" style="position:fixed;bottom:24px;left:24px;z-index:9999;background:#fff;
-padding:8px 12px;border:1px solid #999;border-radius:6px;font:12px/1.5 sans-serif;
+<style>
+#wf-legend{{background:#fff;border:1px solid #999}}
+.wf-legend-summary{{color:#555}}
+.wf-legend-note{{color:#888}}
+@media (prefers-color-scheme:dark){{
+  #wf-legend{{background:#1a1d20;border-color:#3a3f44;color:#e8eaed}}
+  #wf-legend hr{{border-top-color:#444}}
+  .wf-legend-summary{{color:#c7cace}}
+  .wf-legend-note{{color:#9aa0a6}}
+}}
+</style>
+<div id="wf-legend" style="position:fixed;bottom:24px;left:24px;z-index:9999;
+padding:8px 12px;border-radius:6px;font:12px/1.5 sans-serif;
 box-shadow:0 1px 5px rgba(0,0,0,.3);max-width:340px">
 <div style="font-weight:700;cursor:pointer;user-select:none" title="click to collapse / expand"
  onclick="var b=document.getElementById('wf-legend-body'),t=document.getElementById('wf-legend-tog'),h=b.style.display==='none';b.style.display=h?'block':'none';t.textContent=h?'▾':'▸';">
@@ -508,10 +561,10 @@ box-shadow:0 1px 5px rgba(0,0,0,.3);max-width:340px">
 <div id="wf-legend-body" style="margin-top:6px">
 {rows}
 <hr style="margin:8px 0">
-<div style="color:#555"><b>{perm_off} mi</b> permitted off-street (greenway/MUP/bike)
+<div class="wf-legend-summary"><b>{perm_off} mi</b> permitted off-street (greenway/MUP/bike)
 &middot; <b>{gated_rd} mi</b> roads &gt;25mph + <b>{gated_sw} mi</b> sidewalks gated
 <i>(within corporate limits)</i>.</div>
-<div style="color:#888;margin-top:5px;font-size:11px">Ch.30 is a traffic ordinance: it
+<div class="wf-legend-note" style="margin-top:5px;font-size:11px">Ch.30 is a traffic ordinance: it
 applies inside the corporate limits only — not the ETJ or the unincorporated
 enclaves (grey = outside, rule N/A). Boundary: OSM. Facilities: Town of Wake Forest
 ArcGIS. Roads/sidewalks: OpenStreetMap; speed posted where tagged (~8%), else
