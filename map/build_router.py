@@ -263,9 +263,9 @@ start &amp; end -- drag pins to adjust. Click into a field below to re-target it
   Next map click sets: <b id="wfPlacingWho">start</b></div>
 <div style="margin-bottom:4px"><b style="font-size:11.5px">Routing rule</b></div>
 <div style="margin-bottom:2px">
-  <label style="cursor:pointer"><input type="radio" name="wfTier" value="legal"> Legal</label>
+  <label style="cursor:pointer"><input type="radio" name="wfTier" value="legal" checked> Legal</label>
   &nbsp;&nbsp;
-  <label style="cursor:pointer"><input type="radio" name="wfTier" value="safe" checked> Low-stress</label>
+  <label style="cursor:pointer"><input type="radio" name="wfTier" value="safe"> Low-stress</label>
   &nbsp;&nbsp;
   <label style="cursor:pointer"><input type="radio" name="wfTier" value="least_unsafe"> Last&nbsp;resort</label>
 </div>
@@ -339,7 +339,7 @@ app_js = """
   function init() {
     if (!ready()) { return setTimeout(init, 150); }
     var map = @@MAP@@;
-    var state = { start: null, end: null, mode: 'shortest', tier: 'safe', placing: 'start' };
+    var state = { start: null, end: null, mode: 'shortest', tier: 'legal', placing: 'start' };
     var startMarker = null, endMarker = null;
     var routeLayer = L.layerGroup().addTo(map);
     var graph = null;
