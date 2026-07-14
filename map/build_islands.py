@@ -132,7 +132,13 @@ def traversable(r, mode):
     if r["bikelane"] and (mode == "all" or r["speed"] <= 25):
         return True
     if not r["intown"]:
-        return True
+        # Chapter 30 doesn't restrict speed outside the corporate limits, but
+        # keep this in line with the router: never a freeway, and cap at 45 mph
+        # (a road over 45 with no bike lane/sidewalk isn't rideable-in-practice,
+        # and there's no shoulder data to say otherwise). Without this cap the
+        # analysis would "ride" out-of-town freeways and report freeway-severed
+        # subdivisions as connected when no bike-legal crossing exists.
+        return (r["hw"] not in FREEWAY) and (r["speed"] <= 45)
     return r["speed"] <= 25
 
 
@@ -164,6 +170,68 @@ _pr = gpd.sjoin(_buf, _np, predicate="intersects")
 SNAP_PAIRS = [(a, b) for a, b in zip(_pr["osmid_left"], _pr["osmid_right"]) if a < b]
 print(f"node-snap (<= {SNAP_M} m): {len(SNAP_PAIRS)} candidate connector(s)")
 
+# ---- marked-crosswalk connectors (shared with build_route_graph.py) ----------
+# OSM tags pedestrian crossings as highway=footway, footway=crossing, excluded
+# like any footway -- so a marked crosswalk over a barrier road (a freeway/trunk
+# you can neither ride along nor share an intersection node with) leaves the two
+# sides disconnected even though a bike may legally cross there. Bridge each
+# crossing by connecting the nearest routable node on each side: the same idea
+# as the SNAP_PAIRS intersection-gap snap, but for real marked crossings and a
+# wider gap (a road is wider than the 10 m snap tolerance). Used by BOTH the
+# reachability analysis (here) and the router (build_route_graph.py) so their
+# connectivity agrees.
+CROSS_T = 18.0     # m: max distance from a crossing endpoint to a routable node
+CROSS_SPAN = 45.0  # m: max node-to-node span of one crosswalk connector
+_nodes_p = ox.graph_to_gdfs(G, edges=False).to_crs(PROJ)
+_node_x, _node_y = _nodes_p.geometry.x, _nodes_p.geometry.y
+try:
+    _xw = gpd.read_file("osm_highways.geojson")
+    _xw = _xw[_xw["footway"] == "crossing"].to_crs(PROJ) if "footway" in _xw.columns else _xw.iloc[0:0]
+except Exception as _e:
+    print("crosswalk source (osm_highways.geojson) skipped:", _e)
+    _xw = _nodes_p.iloc[0:0]
+
+
+def crosswalk_connectors(used_ids):
+    """[(u, v, span_m), ...]: connectors that bridge marked crosswalks between
+    routable nodes in used_ids. Shared by the reachability analysis and the
+    router so both agree on where a bike can cross a barrier road."""
+    import numpy as np
+    ids = [i for i in used_ids if i in _nodes_p.index]
+    if not len(_xw) or not ids:
+        return []
+    xs = _node_x.loc[ids].to_numpy(); ys = _node_y.loc[ids].to_numpy()
+
+    def nearest(px, py):
+        d = np.hypot(xs - px, ys - py)
+        j = int(d.argmin())
+        return (ids[j], float(d[j])) if d[j] <= CROSS_T else (None, None)
+
+    out = {}
+    for geom in _xw.geometry:
+        if geom is None or geom.is_empty:
+            continue
+        g = max(geom.geoms, key=lambda p: p.length) if geom.geom_type == "MultiLineString" else geom
+        (x0, y0), (x1, y1) = g.coords[0], g.coords[-1]
+        n0, _d0 = nearest(x0, y0)
+        n1, _d1 = nearest(x1, y1)
+        if n0 is None or n1 is None or n0 == n1:
+            continue
+        span = float(np.hypot(_node_x[n0] - _node_x[n1], _node_y[n0] - _node_y[n1]))
+        if span > CROSS_SPAN:
+            continue
+        key = (n0, n1) if n0 < n1 else (n1, n0)
+        if key not in out or span < out[key]:
+            out[key] = span
+    return [(u, v, s) for (u, v), s in out.items()]
+
+
+# crossing pairs over the broadest routability node set (trav_all_sw); reach()
+# adds each only where both endpoints are in that reading's subgraph.
+_cross_nodeset = set(edges.loc[edges["trav_all_sw"], "u"]) | set(edges.loc[edges["trav_all_sw"], "v"])
+CROSS_PAIRS = crosswalk_connectors(_cross_nodeset)
+print(f"marked-crosswalk connectors bridging barrier roads: {len(CROSS_PAIRS)}")
+
 # ---- coverage + ambiguous bike lanes ----------------------------------------
 inrd = edges[edges["intown"] & roadmask]
 cov = inrd.groupby(inrd.apply(
@@ -182,6 +250,9 @@ def reach(col):
     for a, b in SNAP_PAIRS:
         if a in P and b in P:
             P.add_edge(a, b, length=0.0)
+    for a, b, s in CROSS_PAIRS:
+        if a in P and b in P:
+            P.add_edge(a, b, length=s)
     comps = list(nx.connected_components(P))
     main = max(comps, key=lambda c: sum(d["length"] for _, _, d in P.subgraph(c).edges(data=True)))
     n2c = {n: i for i, c in enumerate(comps) for n in c}
@@ -251,6 +322,9 @@ for _, r in edges[edges["trav_all"]].iterrows():
 for a, b in SNAP_PAIRS:
     if a in P0 and b in P0:
         P0.add_edge(a, b, length=0.0)
+for a, b, s in CROSS_PAIRS:
+    if a in P0 and b in P0:
+        P0.add_edge(a, b, length=s)
 comps0 = list(nx.connected_components(P0))
 main0 = max(comps0, key=lambda c: sum(d["length"] for _, _, d in P0.subgraph(c).edges(data=True)))
 n2c0 = {n: i for i, c in enumerate(comps0) for n in c}

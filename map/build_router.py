@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
 """Wake Forest bike-route planner: point-to-point routing over the graph
 build_route_graph.py exports, under three selectable rules:
-  Legal        -- Chapter 30 + the sidewalk-legalization reading (matches
-                  build_islands.py's trav_all_sw); legal is not always safe.
-  Safe         -- the same physical-safety rule applied everywhere, in town
-                  or not: <=25 mph, bike lane, path, or a >25 mph road with a
-                  genuinely adjacent sidewalk. No freeways, ever.
-  Least-unsafe -- Safe, plus a last-resort bridging allowance (26-44 mph, no
-                  bike lane/sidewalk, heavily cost-penalized) for reaching
-                  areas Safe alone can't connect to. Never uses a 45+ mph
+  Legal        -- what Chapter 30 allows TODAY: <=25 mph streets, bike lanes,
+                  and paths. Riding on a sidewalk is barred (Chapter 30), so it
+                  is NOT part of Legal. Outside the corporate limits Chapter 30
+                  doesn't restrict speed, but this is capped at 45 mph and
+                  never a freeway. Legal is not always safe.
+  Low-stress   -- the same lower-stress rule applied everywhere, in town or
+                  not: <=25 mph, bike lane, path, or a >25 mph road with a
+                  genuinely adjacent sidewalk. No freeways, ever. A comfort
+                  ranking, NOT a safety guarantee (labelled "Low-stress", not
+                  "Safe", to avoid that claim).
+  Last resort  -- Low-stress, plus a last-resort bridging allowance (26-44 mph,
+                  no bike lane/sidewalk, heavily cost-penalized) for reaching
+                  areas Low-stress alone can't connect to. Never uses a 45+ mph
                   road; crossing one at an intersection still works for free,
-                  via the shared node where a safe cross-street continues.
+                  via the shared node where a cross-street continues, or over a
+                  marked crosswalk (kind 'crossing') where a barrier road would
+                  otherwise split the network.
+
+  (The display labels are Legal / Low-stress / Last resort; the tier KEYS in the
+  code stay 'legal' / 'safe' / 'least_unsafe'.)
 
 The site deploys as static files (no backend), so all routing runs CLIENT-SIDE
 in the browser: a hand-written Dijkstra over wf-route-graph.json (built by
@@ -255,9 +265,9 @@ start &amp; end -- drag pins to adjust. Click into a field below to re-target it
 <div style="margin-bottom:2px">
   <label style="cursor:pointer"><input type="radio" name="wfTier" value="legal"> Legal</label>
   &nbsp;&nbsp;
-  <label style="cursor:pointer"><input type="radio" name="wfTier" value="safe" checked> Safe</label>
+  <label style="cursor:pointer"><input type="radio" name="wfTier" value="safe" checked> Low-stress</label>
   &nbsp;&nbsp;
-  <label style="cursor:pointer"><input type="radio" name="wfTier" value="least_unsafe"> Least-unsafe</label>
+  <label style="cursor:pointer"><input type="radio" name="wfTier" value="least_unsafe"> Last&nbsp;resort</label>
 </div>
 <div id="wfTierNote" class="wf-hint" style="font-size:11px;margin:2px 0 8px"></div>
 <div style="margin-bottom:8px">
@@ -269,6 +279,10 @@ start &amp; end -- drag pins to adjust. Click into a field below to re-target it
 <div id="wfStatus" class="wf-status" style="font-size:11.5px;margin-top:6px"></div>
 <hr style="margin:10px 0">
 <div id="wfResults" style="font-size:12.5px">Set a start and end point to see a route.</div>
+<div class="wf-legal">
+  <span class="wf-legal-line" onclick="var b=this.parentNode.querySelector('.wf-legal-body'),t=this.querySelector('.wf-legal-tog'),h=b.style.display==='none';b.style.display=h?'block':'none';t.textContent=h?'details ▴':'details ▾';"><b>Planning aid only — not legal or safety advice.</b> <span class="wf-legal-tog">details ▾</span></span>
+  <div class="wf-legal-body" style="display:none">@@DISCLAIMER@@</div>
+</div>
 </div>
 </div>
 <style>
@@ -293,6 +307,10 @@ start &amp; end -- drag pins to adjust. Click into a field below to re-target it
 .wf-cur-bad{color:#a33}
 .wf-sw-note{margin-top:6px;color:#a3630a;font-size:11.5px}
 .wf-unsafe-note{margin-top:6px;color:#a33;font-size:11.5px}
+.wf-legal{margin-top:10px;padding-top:8px;border-top:1px solid #ddd;font-size:10.5px;color:#8a9096;line-height:1.5}
+.wf-legal-line{cursor:pointer;user-select:none;display:block}
+.wf-legal-tog{color:#137a37;text-decoration:underline;white-space:nowrap}
+.wf-legal-body{margin-top:5px}
 .wf-pin{border-radius:50%;color:#fff;font-weight:700;text-align:center;line-height:22px;
   box-shadow:0 1px 3px rgba(0,0,0,.5);border:2px solid #fff}
 .wf-pin-start{background:#1a9641}
@@ -305,6 +323,8 @@ start &amp; end -- drag pins to adjust. Click into a field below to re-target it
 .wf-dark .wf-status,.wf-dark .wf-cur-bad,.wf-dark .wf-unsafe-note{color:#e07a7a}
 .wf-dark .wf-sw-note{color:#e0a95a}
 .wf-dark .wf-cur{border-top-color:#444;color:#c7cace}
+.wf-dark .wf-legal{border-top-color:#333}
+.wf-dark .wf-legal-tog{color:#5fcf83}
 </style>
 """
 
@@ -325,26 +345,30 @@ app_js = """
     var graph = null;
 
     var TIERS = ['legal', 'safe', 'least_unsafe'];
-    var TIER_LABEL = {legal: 'Legal', safe: 'Safe', least_unsafe: 'Least-unsafe'};
+    var TIER_LABEL = {legal: 'Legal', safe: 'Low-stress', least_unsafe: 'Last resort'};
     var TIER_NOTE = {
-      legal: 'What Chapter 30 (plus the sidewalk fix) legally allows. Outside town, speed is '
-        + 'capped at 45 mph (never a faster road without a bike lane or sidewalk, and never a '
-        + 'freeway) \\u2014 still not always as safe as the Safe tier.',
-      safe: 'Only \\u226425 mph streets, bike lanes, paths, or a >25 mph road with a genuinely '
-        + 'adjacent sidewalk. No exceptions, in town or out.',
-      least_unsafe: 'Safe routes, plus a last resort: 26\\u201344 mph roads with no bike lane or '
-        + 'sidewalk, used only when nothing safer connects. Never a 45+ mph road (crossing one '
+      legal: 'What Chapter 30 allows today: \\u226425 mph streets, bike lanes, and paths. '
+        + 'Riding on a sidewalk is barred, so it is not counted here. Outside town Chapter 30 '
+        + 'doesn\\u2019t restrict speed, but this still caps it at 45 mph and never a freeway '
+        + '\\u2014 legal is not always as calm as the Low-stress routes.',
+      safe: 'Lower-stress routes only: paths, bike lanes, \\u226425 mph streets, or a sidewalk '
+        + 'along a faster road. The same in town or out \\u2014 a comfort ranking, not a safety '
+        + 'guarantee. Some stretches are not legal to ride today (see Legal).',
+      least_unsafe: 'Low-stress routes, plus a last resort: 26\\u201344 mph roads with no bike lane '
+        + 'or sidewalk, used only when nothing calmer connects. Never a 45+ mph road (crossing one '
         + 'at an intersection is fine).',
     };
     var COLORS = {path: '#1a9641', bikelane: '#984ea3', slow_street: '#a6d96a',
                   sidewalk_fast: '#e08214', legal_other: '#4575b4',
-                  unsafe_connector: '#d7191c', lot: '#8c8c8c', snap: '#999999'};
+                  unsafe_connector: '#d7191c', lot: '#8c8c8c', crossing: '#3690c0',
+                  snap: '#999999'};
     var LABELS = {path: 'Greenway / multi-use path / cycleway', bikelane: 'On-road bike lane',
                   slow_street: 'Street ≤25 mph',
                   sidewalk_fast: 'Sidewalk on a road >25 mph (needs a signed exception)',
                   legal_other: 'Legal via jurisdiction exemption (outside town, \\u226445 mph, no freeway)',
                   unsafe_connector: 'Moderate-speed connector (26\\u201344 mph, no bike lane/sidewalk)',
-                  lot: 'Parking lot aisle / driveway'};
+                  lot: 'Parking lot aisle / driveway',
+                  crossing: 'Marked crosswalk across a barrier road'};
     // sidewalk_fast was 4.0 -- too punitive: it could make "comfortable" mode
     // take a multi-mile detour through parking lots/greenways to dodge even a
     // short, perfectly rideable signed-sidewalk stretch, producing a LONGER
@@ -352,7 +376,8 @@ app_js = """
     // nudges away from long sidewalk-riding in favor of a comparable-length
     // path/street, without preferring a much longer route to avoid it.
     var COMFORT_MULT = {path: 1.0, bikelane: 1.15, slow_street: 1.4, sidewalk_fast: 1.8,
-                        legal_other: 2.0, unsafe_connector: 1.0, lot: 1.2, snap: 1.0};
+                        legal_other: 2.0, unsafe_connector: 1.0, lot: 1.2, crossing: 1.25,
+                        snap: 1.0};
     var UNSAFE_PENALTY = 20;
 
     // ---- graph load ------------------------------------------------------
@@ -386,11 +411,16 @@ app_js = """
     // once per edge; it's evaluated at routing time. ------------------------
     function classify(e, tier) {
       if (e.snap) { return {ok: true, kind: 'snap'}; }
+      if (e.cross) { return {ok: true, kind: 'crossing'}; }
       if (e.path) { return {ok: true, kind: 'path'}; }
       if (e.bikelane) { return {ok: true, kind: 'bikelane'}; }
       if (e.lot) { return {ok: true, kind: 'lot'}; }
       if (e.speed <= 25) { return {ok: true, kind: 'slow_street'}; }
-      if (e.sidewalk && !e.freeway) { return {ok: true, kind: 'sidewalk_fast'}; }
+      // Riding a sidewalk (a >25 mph road with an adjacent sidewalk) is NOT
+      // legal today -- Chapter 30 bars sidewalks -- so it is excluded from the
+      // Legal tier; it stays available in Safe/Least-unsafe, which weigh
+      // physical safety, not legality.
+      if (e.sidewalk && !e.freeway && tier !== 'legal') { return {ok: true, kind: 'sidewalk_fast'}; }
       if (tier === 'legal' && !e.intown && e.speed <= 45 && !e.freeway) {
         return {ok: true, kind: 'legal_other'};
       }
@@ -484,7 +514,7 @@ app_js = """
     // independent of routing mode -- comfortable-mode "cost" is not mileage) --
     function summarize(steps, tier) {
       var totals = {path: 0, bikelane: 0, slow_street: 0, sidewalk_fast: 0,
-                    legal_other: 0, unsafe_connector: 0, lot: 0, snap: 0};
+                    legal_other: 0, unsafe_connector: 0, lot: 0, crossing: 0, snap: 0};
       var swNames = [], unsafeNames = [];
       for (var i = 0; i < steps.length; i++) {
         var e = graph.edges[steps[i].idx];
@@ -538,7 +568,7 @@ app_js = """
       }
 
       var b = sel.breakdown;
-      var rows = ['path', 'bikelane', 'lot', 'slow_street', 'sidewalk_fast', 'legal_other', 'unsafe_connector']
+      var rows = ['path', 'bikelane', 'lot', 'crossing', 'slow_street', 'sidewalk_fast', 'legal_other', 'unsafe_connector']
         .map(function(k) {
           var m = b.totals[k] || 0;
           if (m < 1) { return ''; }
@@ -691,7 +721,61 @@ app_js = """
 """
 app_js = app_js.replace("@@MAP@@", m.get_name())
 
+# ---- legal disclaimer: a first-visit dismissible notice + a persistent
+# collapsible footer in the panel. Both share the same text via @@DISCLAIMER@@.
+DISCLAIMER_TEXT = (
+    "Routes here are modeled from public data (OpenStreetMap, NCDOT, and the "
+    "Town of Wake Forest GIS) that may be incomplete, out of date, or wrong, and "
+    "are not checked against conditions on the ground. The <b>Legal</b> view is a "
+    "good-faith reading of Chapter 30, not a determination of law — rules "
+    "change and vary by location. You alone are responsible for obeying traffic "
+    "laws and riding safely. <b>Use at your own risk.</b>"
+)
+disclaimer_html = """
+<style>
+.wf-disc-overlay{position:fixed;inset:0;z-index:100000;display:none;
+  align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:1rem;
+  font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+.wf-disc-card{background:#fff;color:#1b1d20;max-width:460px;border-radius:9px;
+  padding:20px 24px;box-shadow:0 8px 34px rgba(0,0,0,.45)}
+.wf-disc-card h3{margin:0 0 9px;font-size:16px}
+.wf-disc-card p{margin:0 0 16px;font-size:13px;color:#333}
+.wf-disc-actions{text-align:right}
+.wf-disc-card button{padding:7px 16px;border:1px solid #15803a;border-radius:5px;
+  background:#1a9641;color:#fff;cursor:pointer;font:inherit;font-weight:600}
+.wf-disc-card button:hover{background:#15803a}
+.wf-dark .wf-disc-card{background:#1a1d20;color:#e8eaed}
+.wf-dark .wf-disc-card p{color:#c7cace}
+</style>
+<div id="wfDisclaimer" class="wf-disc-overlay">
+  <div class="wf-disc-card" role="dialog" aria-modal="true" aria-labelledby="wfDiscTitle">
+    <h3 id="wfDiscTitle">Before you plan a route</h3>
+    <p>@@DISCLAIMER@@</p>
+    <div class="wf-disc-actions"><button id="wfDiscOk" type="button">I understand</button></div>
+  </div>
+</div>
+<script>
+(function() {
+  var el = document.getElementById('wfDisclaimer');
+  if (!el) { return; }
+  var ack = false;
+  try { ack = !!localStorage.getItem('wfDisclaimerAck'); } catch (e) {}
+  if (!ack) { el.style.display = 'flex'; }
+  var ok = document.getElementById('wfDiscOk');
+  if (ok) {
+    ok.addEventListener('click', function() {
+      el.style.display = 'none';
+      try { localStorage.setItem('wfDisclaimerAck', '1'); } catch (e) {}
+    });
+  }
+})();
+</script>
+"""
+panel_html = panel_html.replace("@@DISCLAIMER@@", DISCLAIMER_TEXT)
+disclaimer_html = disclaimer_html.replace("@@DISCLAIMER@@", DISCLAIMER_TEXT)
+
 m.get_root().html.add_child(folium.Element(panel_html))
+m.get_root().html.add_child(folium.Element(disclaimer_html))
 m.get_root().html.add_child(folium.Element(app_js))
 
 out = "../wake-forest-router.html"

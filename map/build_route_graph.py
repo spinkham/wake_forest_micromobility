@@ -2,16 +2,16 @@
 """Export the routable graph as compact JSON for the client-side router
 (build_router.py), which offers THREE routing tiers:
 
-  legal        -- Chapter 30 + the sidewalk-legalization reading, including
-                  the town's jurisdictional quirk that speed is unrestricted
-                  outside the corporate limits -- but CAPPED at 45 mph: a
-                  road over 45 with no bike lane/sidewalk is never legal here,
-                  in town or out, and freeways are excluded outright
-                  regardless of posted speed. (Differs from build_islands.py's
-                  own trav_all_sw, which has no such cap -- that reading is
-                  used for the main map's reachability analysis, not here.)
-                  Legal is still not the same as safe: a 45 mph road with no
-                  bike lane outside town is legal but not safe.
+  legal        -- what Chapter 30 allows TODAY: paths, on-road bike lanes,
+                  and <=25 mph streets. Riding on a sidewalk is BARRED by
+                  Chapter 30, so sidewalk-along-a-fast-road is NOT legal and
+                  is excluded here (it stays usable in the safe/least_unsafe
+                  tiers, which weigh physical safety, not legality). The
+                  town's jurisdictional quirk (speed unrestricted outside the
+                  corporate limits) is honored but CAPPED at 45 mph, and
+                  freeways are excluded outright. Legal is not the same as
+                  safe: a 45 mph road with no bike lane outside town is legal
+                  but not safe.
   safe         -- the same speed-based safety rule applied UNIFORMLY, in town
                   or not (see the "safe riding map" fix): <=25 mph, a bike
                   lane, a path/cycleway, or a >25 mph road with a genuinely
@@ -47,7 +47,8 @@ Output: ../wf-route-graph.json
                 "poly": [[lat, lon], ...],
                "path": bool, "bikelane": bool, "speed": int,
                "sidewalk": bool, "freeway": bool, "intown": bool, "lot": bool}
-              | {"u": id, "v": id, "len": 0, "snap": true, "poly": [...]}, ...]
+              | {"u": id, "v": id, "len": 0, "snap": true, "poly": [...]}
+              | {"u": id, "v": id, "len": meters, "cross": true, "poly": [...]}, ...]
   }
 """
 import json
@@ -114,7 +115,25 @@ def _head(v):
 edges["service1"] = edges["service"].map(_head)
 edges["access1"] = edges["access"].map(_head)
 _is_service = edges["hw"] == "service"
-edges["is_lot"] = _is_service & ~edges["access1"].isin(["private", "no"])
+
+# Manually-excluded private drives that OSM doesn't (yet) tag as private. OSM
+# way 18889026 is the "no thru traffic" private cut-through between South White
+# St and South Main St -- untagged in OSM, so the access rule below can't catch
+# it, and the router was sending riders down it (the article's route avoids it
+# by skipping every service road). Drop it here until it's tagged in OSM and the
+# pinned graph is re-fetched; then this override becomes a harmless no-op.
+PRIVATE_WAYS = {18889026}
+
+
+def _is_private_way(o):
+    return any(i in PRIVATE_WAYS for i in (o if isinstance(o, list) else [o]))
+
+
+# access=destination is "no through traffic" -- not a valid cut-through, so it's
+# excluded too. access=customers is NOT excluded: those are store parking lots we
+# specifically want reachable (that's the whole point of routing through lots).
+edges["is_lot"] = _is_service & ~edges["access1"].isin(["private", "no", "destination"]) \
+    & ~edges["osmid"].map(_is_private_way)
 _svc_mph = edges["maxspeed"].map(lambda v: mph(v))
 _svc_needs_default = edges["is_lot"] & edges["posted"].isna() & _svc_mph.isna()
 edges.loc[_svc_needs_default, "speed"] = 10
@@ -122,23 +141,28 @@ edges.loc[_svc_needs_default, "speed"] = 10
 NONRIDE_STRICT = NONRIDE - {"service"}
 
 # ---- master traversability: union of all three tiers (what to export) -----
-# legal:        path | bikelane | speed<=25 | sidewalk | (not intown & speed<=45 & not freeway)
-# safe:         path | bikelane | speed<=25 | (sidewalk & not freeway)
-# least_unsafe: safe | (25 < speed < 45 & not freeway)
+# legal (today):  path | bikelane | speed<=25 | (not intown & speed<=45 & not freeway)
+# safe:           path | bikelane | speed<=25 | (sidewalk & not freeway)
+# least_unsafe:   safe | (25 < speed < 45 & not freeway)
 #
-# The jurisdiction exemption (Chapter 30 doesn't restrict speed outside the
-# corporate limits) is now CAPPED at 45 mph: a road over 45 with no bike lane
-# or sidewalk is never "legal" here, in town or out. Freeways are excluded
-# from the exemption outright regardless of their posted speed -- NC law bars
-# bikes from limited-access highways independent of Chapter 30, and there's
-# no shoulder data to say a fast freeway ramp is any safer than the mainline.
+# Legal today does NOT include sidewalk riding -- Chapter 30 bars micromobility
+# from sidewalks, so a >25 mph road that's only usable via its sidewalk is not
+# legal (that stays in the SAFE tier, which is about physical safety). The
+# jurisdiction exemption (Chapter 30 doesn't restrict speed outside the
+# corporate limits) is honored but CAPPED at 45 mph, and freeways are excluded
+# outright -- NC law bars bikes from limited-access highways independent of
+# Chapter 30, and there's no shoulder data to say a fast freeway ramp is any
+# safer than the mainline.
 _legal_outside = (~edges["intown"]) & (edges["speed"] <= 45) & (~edges["is_freeway"])
-_legal = edges["is_path"] | edges["bikelane"] | (edges["speed"] <= 25) \
-    | edges["sidewalk_safe"] | _legal_outside
+_legal = edges["is_path"] | edges["bikelane"] | (edges["speed"] <= 25) | _legal_outside
+_safe = edges["is_path"] | edges["bikelane"] | (edges["speed"] <= 25) \
+    | (edges["sidewalk_safe"] & ~edges["is_freeway"])
 _least_unsafe_extra = (edges["speed"] > 25) & (edges["speed"] < 45) & (~edges["is_freeway"])
 _blocked = (edges["hw"].isin(NONRIDE_STRICT) & ~edges["is_greenway_footway"]) \
     | (_is_service & ~edges["is_lot"])
-edges["trav_master"] = (~_blocked) & (_legal | _least_unsafe_extra)
+# export the union of everything any tier can traverse -- sidewalk edges are
+# kept (the SAFE tier needs them) even though they're no longer "legal".
+edges["trav_master"] = (~_blocked) & (_legal | _safe | _least_unsafe_extra)
 # (footway/steps/pedestrian/construction/proposed/track, plus private/no-
 # access service roads, are never rideable in any tier.)
 
@@ -205,6 +229,18 @@ for a, b in SNAP_PAIRS_ALL:
                           "poly": [], "snap": True})
         snap_added += 1
 
+# ---- marked-crosswalk connectors: let a bike route over a marked crosswalk
+# where a barrier road (esp. a freeway/trunk you can neither ride along nor
+# share an intersection node with) would otherwise split the rideable network.
+# crosswalk_connectors() is the shared helper defined in build_islands.py, so
+# the router and the reachability map agree on this connectivity. A crossing is
+# usable in every tier (kind 'crossing' in build_router.py's classify()). --
+cross_added = 0
+for a, b, span in crosswalk_connectors(used_nodes):
+    out_edges.append({"u": int(a), "v": int(b), "len": float(span), "name": None,
+                      "poly": [], "cross": True})
+    cross_added += 1
+
 # ---- node coordinates ---------------------------------------------------
 node_gdf = ox.graph_to_gdfs(G, edges=False)
 node_gdf = node_gdf[node_gdf.index.isin(used_nodes)]
@@ -212,7 +248,7 @@ out_nodes = {str(idx): [round(row.geometry.y, 5), round(row.geometry.x, 5)]
              for idx, row in node_gdf.iterrows()}
 
 for e in out_edges:
-    if e.get("snap"):
+    if e.get("snap") or e.get("cross"):
         e["poly"] = [out_nodes[str(e["u"])], out_nodes[str(e["v"])]]
 
 b = juris.total_bounds  # [minx, miny, maxx, maxy] in EPSG:4326 (lon, lat)
@@ -227,4 +263,4 @@ with open(out_path, "w") as fh:
     json.dump(result, fh, separators=(",", ":"))
 
 print(f"saved {out_path}: {len(out_nodes)} nodes, {len(out_edges)} edges "
-      f"({snap_added} snap connectors)")
+      f"({snap_added} snap connectors, {cross_added} crosswalk connectors)")

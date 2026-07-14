@@ -555,7 +555,7 @@ m.get_root().html.add_child(folium.Element(f"""
         '<label style="cursor:pointer;display:block"><input type="checkbox" id="interpChk"' + (PERM ? ' checked' : '') + '> <b>Bike lanes count on &gt;25&nbsp;mph roads</b></label>' +
         '<div class="wf-interp-note" style="color:#888;font-size:10px;margin:2px 0 5px 2px">rule interpretation — affects reachability &amp; bike-lane layers</div>' +
         '<label style="cursor:pointer;display:block"><input type="checkbox" id="swChk"' + (SW ? ' checked' : '') + '> <b>Sidewalks usable on &gt;25&nbsp;mph roads (no bike lane)</b></label>' +
-        '<div class="wf-interp-note" style="color:#888;font-size:10px;margin:2px 0 0 2px">reachability only — reconnects ~69% of otherwise-stranded miles</div>';
+        '<div class="wf-interp-note" style="color:#888;font-size:10px;margin:2px 0 0 2px">reachability only — reconnects ~63% of otherwise-stranded miles</div>';
       L.DomEvent.disableClickPropagation(sec);
       list.querySelector('#interpChk').addEventListener('change', function(e) {{ PERM = e.target.checked; apply(); }});
       list.querySelector('#swChk').addEventListener('change', function(e) {{ SW = e.target.checked; apply(); }});
