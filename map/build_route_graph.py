@@ -71,6 +71,48 @@ if _swbuf_all is not None:
 edges["is_freeway"] = edges["hw"].isin(FREEWAY)
 edges["is_path"] = edges["hw"].isin(("cycleway", "path"))
 
+# ---- footways as sidewalk links (safe/least_unsafe only, never legal) -------
+# The Legal tier bars footways and that is CORRECT: Ch.30 bars sidewalk riding,
+# and Wake Forest's greenways connect to the street grid almost exclusively via
+# sidewalks (measured: of the footway edges touching a greenway/path node, 85%
+# are footway=sidewalk and 86% run within 18 m of a road centerline). So "you
+# cannot legally ride from Rogers Road onto Smith Creek Greenway" is a finding,
+# not a bug -- Legal keeps refusing them, and only a footway the Town's own GIS
+# calls a greenway (is_greenway_footway, below) becomes legal.
+#
+# But safe/least_unsafe were INCONSISTENT: classify() already puts a rider on a
+# >25 mph road's sidewalk (kind 'sidewalk_fast'), then refused the sidewalk that
+# links that same road to a greenway -- stranding e.g. Smith Creek Greenway
+# behind a 1034 m detour around a real 100 m footway bridge. Those two tiers
+# weigh physical safety, and a sidewalk is low-stress, so allow footways there.
+#
+# Gated on a rideable surface: half the ambiguous footway mileage is
+# surface=dirt (genuine hiking trail, not rideable), and bicycle=no/private is
+# an explicit prohibition. Reading surface/bicycle at all is only possible
+# because the graph is now re-pinned with them in useful_tags_way.
+UNRIDEABLE_SURFACE = {"dirt", "ground", "sand", "grass", "mud", "earth", "woodchips"}
+
+
+def _head_tag(v):
+    """First value of a possibly-list OSM tag, as a str; None if absent/NaN."""
+    if isinstance(v, list):
+        v = v[0] if v else None
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    return str(v)
+
+
+edges["surface1"] = (edges["surface"].map(_head_tag) if "surface" in edges.columns
+                     else pd.Series(None, index=edges.index, dtype=object))
+edges["bicycle1"] = (edges["bicycle"].map(_head_tag) if "bicycle" in edges.columns
+                     else pd.Series(None, index=edges.index, dtype=object))
+edges["is_footlink"] = (edges["hw"].isin(("footway", "pedestrian", "steps"))
+                        & ~edges["surface1"].isin(UNRIDEABLE_SURFACE)
+                        & ~edges["bicycle1"].isin(["no", "private"]))
+print(f"footway/sidewalk links opened to the safe + least-unsafe tiers "
+      f"(rideable surface, not bicycle=no): {edges['is_footlink'].sum()} edges, "
+      f"{edges.loc[edges['is_footlink'], 'len_mi'].sum():.1f} mi")
+
 # ---- greenway-as-footway: some of the town's own paved, shared-use greenway
 # trails are tagged highway=footway in OSM instead of cycleway/path (e.g.
 # "Kiwanis Greenway" and "Dunn Creek Greenway" -- confirmed via the Town's own
@@ -156,9 +198,13 @@ NONRIDE_STRICT = NONRIDE - {"service"}
 _legal_outside = (~edges["intown"]) & (edges["speed"] <= 45) & (~edges["is_freeway"])
 _legal = edges["is_path"] | edges["bikelane"] | (edges["speed"] <= 25) | _legal_outside
 _safe = edges["is_path"] | edges["bikelane"] | (edges["speed"] <= 25) \
-    | (edges["sidewalk_safe"] & ~edges["is_freeway"])
+    | (edges["sidewalk_safe"] & ~edges["is_freeway"]) | edges["is_footlink"]
 _least_unsafe_extra = (edges["speed"] > 25) & (edges["speed"] < 45) & (~edges["is_freeway"])
-_blocked = (edges["hw"].isin(NONRIDE_STRICT) & ~edges["is_greenway_footway"]) \
+# footway/pedestrian/steps stay blocked for the LEGAL tier (classify() gates
+# kind 'sidewalk_link' on tier !== 'legal'), but are no longer dropped from the
+# export -- the safe/least_unsafe tiers need them to reach greenways at all.
+_blocked = (edges["hw"].isin(NONRIDE_STRICT) & ~edges["is_greenway_footway"]
+            & ~edges["is_footlink"]) \
     | (_is_service & ~edges["is_lot"])
 # export the union of everything any tier can traverse -- sidewalk edges are
 # kept (the SAFE tier needs them) even though they're no longer "legal".
@@ -210,36 +256,70 @@ for _, r in rt.iterrows():
         "speed": int(r["speed"]), "sidewalk": bool(r["sidewalk_safe"]),
         "freeway": bool(r["is_freeway"]), "intown": bool(r["intown"]),
         "lot": bool(r["is_lot"]),
+        # a footway/sidewalk usable only in the safe + least_unsafe tiers
+        "foot": bool(r["is_footlink"] and not r["is_path"]),
     })
 
 used_nodes = {e["u"] for e in out_edges} | {e["v"] for e in out_edges}
+# Nodes reachable WITHOUT setting foot on a footway -- i.e. the node set the
+# router had before footways were exported at all. Both connector families below
+# are computed over this set FIRST so the Legal tier's connectivity is bit-for-bit
+# what it was pre-fix; the footway-only extras are then added, tainted foot=True.
+#
+# Why this matters (both caught by diffing against a pre-fix control build):
+#  * snap/cross connectors are traversable in EVERY tier, so a 0-length snap onto
+#    a sidewalk node and back off it handed the LEGAL tier a free bridge through
+#    the sidewalk network -- 1724 footway nodes were bridging >=2 road nodes,
+#    inflating Legal's main component by ~4000 nodes.
+#  * crosswalk_connectors() snaps each crossing END to its NEAREST routable node.
+#    Once sidewalk nodes existed they were usually nearer than the road node, so
+#    372 of the original 474 connectors silently RE-TARGETED off the road network
+#    and Legal LOST real connectivity it used to have.
+road_nodes = ({e["u"] for e in out_edges if not e["foot"]}
+              | {e["v"] for e in out_edges if not e["foot"]})
 
-# ---- intersection-gap snap connectors, recomputed for the master node set --
-_np_all = ox.graph_to_gdfs(G, edges=False).to_crs(PROJ)
-_np_all = _np_all[_np_all.index.isin(used_nodes)].reset_index()[["osmid", "geometry"]]
-_buf_all = _np_all.copy()
-_buf_all["geometry"] = _buf_all.geometry.buffer(SNAP_M)
-_pr_all = gpd.sjoin(_buf_all, _np_all, predicate="intersects")
-SNAP_PAIRS_ALL = [(a, b) for a, b in zip(_pr_all["osmid_left"], _pr_all["osmid_right"]) if a < b]
 
-snap_added = 0
+def _snap_pairs(nodeset):
+    np_ = ox.graph_to_gdfs(G, edges=False).to_crs(PROJ)
+    np_ = np_[np_.index.isin(nodeset)].reset_index()[["osmid", "geometry"]]
+    buf = np_.copy()
+    buf["geometry"] = buf.geometry.buffer(SNAP_M)
+    pr = gpd.sjoin(buf, np_, predicate="intersects")
+    return {(a, b) for a, b in zip(pr["osmid_left"], pr["osmid_right"]) if a < b}
+
+
+SNAP_ROAD = _snap_pairs(road_nodes)
+SNAP_PAIRS_ALL = _snap_pairs(used_nodes)
+
+snap_added = snap_foot = 0
 for a, b in SNAP_PAIRS_ALL:
-    if a in used_nodes and b in used_nodes:
-        out_edges.append({"u": int(a), "v": int(b), "len": 0.0, "name": None,
-                          "poly": [], "snap": True})
-        snap_added += 1
+    tainted = (a, b) not in SNAP_ROAD
+    out_edges.append({"u": int(a), "v": int(b), "len": 0.0, "name": None,
+                      "poly": [], "snap": True, "foot": tainted})
+    snap_added += 1
+    snap_foot += tainted
 
 # ---- marked-crosswalk connectors: let a bike route over a marked crosswalk
 # where a barrier road (esp. a freeway/trunk you can neither ride along nor
 # share an intersection node with) would otherwise split the rideable network.
 # crosswalk_connectors() is the shared helper defined in build_islands.py, so
 # the router and the reachability map agree on this connectivity. A crossing is
-# usable in every tier (kind 'crossing' in build_router.py's classify()). --
-cross_added = 0
-for a, b, span in crosswalk_connectors(used_nodes):
+# usable in every tier UNLESS it only exists by landing on a sidewalk node
+# (foot=True), which the Legal tier can't use -- see the road_nodes note above.
+CROSS_ROAD = crosswalk_connectors(road_nodes)
+_cross_road_keys = {(min(a, b), max(a, b)) for a, b, _ in CROSS_ROAD}
+cross_added = cross_foot = 0
+for a, b, span in CROSS_ROAD:
     out_edges.append({"u": int(a), "v": int(b), "len": float(span), "name": None,
-                      "poly": [], "cross": True})
+                      "poly": [], "cross": True, "foot": False})
     cross_added += 1
+for a, b, span in crosswalk_connectors(used_nodes):
+    if (min(a, b), max(a, b)) in _cross_road_keys:
+        continue
+    out_edges.append({"u": int(a), "v": int(b), "len": float(span), "name": None,
+                      "poly": [], "cross": True, "foot": True})
+    cross_added += 1
+    cross_foot += 1
 
 # ---- node coordinates ---------------------------------------------------
 node_gdf = ox.graph_to_gdfs(G, edges=False)
@@ -263,4 +343,7 @@ with open(out_path, "w") as fh:
     json.dump(result, fh, separators=(",", ":"))
 
 print(f"saved {out_path}: {len(out_nodes)} nodes, {len(out_edges)} edges "
-      f"({snap_added} snap connectors, {cross_added} crosswalk connectors)")
+      f"({snap_added} snap connectors, {snap_foot} of them footway-only; "
+      f"{cross_added} crosswalk connectors, {cross_foot} footway-only). "
+      f"Legal sees {snap_added - snap_foot} snap + {cross_added - cross_foot} crosswalk "
+      f"connectors -- unchanged from before footways were exported.")

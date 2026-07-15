@@ -361,14 +361,15 @@ app_js = """
     var COLORS = {path: '#1a9641', bikelane: '#984ea3', slow_street: '#a6d96a',
                   sidewalk_fast: '#e08214', legal_other: '#4575b4',
                   unsafe_connector: '#d7191c', lot: '#8c8c8c', crossing: '#3690c0',
-                  snap: '#999999'};
+                  snap: '#999999', sidewalk_link: '#fdb863'};
     var LABELS = {path: 'Greenway / multi-use path / cycleway', bikelane: 'On-road bike lane',
                   slow_street: 'Street ≤25 mph',
                   sidewalk_fast: 'Sidewalk on a road >25 mph (needs a signed exception)',
                   legal_other: 'Legal via jurisdiction exemption (outside town, \\u226445 mph, no freeway)',
                   unsafe_connector: 'Moderate-speed connector (26\\u201344 mph, no bike lane/sidewalk)',
                   lot: 'Parking lot aisle / driveway',
-                  crossing: 'Marked crosswalk across a barrier road'};
+                  crossing: 'Marked crosswalk across a barrier road',
+                  sidewalk_link: 'Sidewalk / footway link (needs a signed exception)'};
     // sidewalk_fast was 4.0 -- too punitive: it could make "comfortable" mode
     // take a multi-mile detour through parking lots/greenways to dodge even a
     // short, perfectly rideable signed-sidewalk stretch, producing a LONGER
@@ -377,7 +378,7 @@ app_js = """
     // path/street, without preferring a much longer route to avoid it.
     var COMFORT_MULT = {path: 1.0, bikelane: 1.15, slow_street: 1.4, sidewalk_fast: 1.8,
                         legal_other: 2.0, unsafe_connector: 1.0, lot: 1.2, crossing: 1.25,
-                        snap: 1.0};
+                        snap: 1.0, sidewalk_link: 1.8};
     var UNSAFE_PENALTY = 20;
 
     // ---- graph load ------------------------------------------------------
@@ -410,11 +411,38 @@ app_js = """
     // "unsafe_connector" under Least-unsafe) -- so this can't be precomputed
     // once per edge; it's evaluated at routing time. ------------------------
     function classify(e, tier) {
-      if (e.snap) { return {ok: true, kind: 'snap'}; }
-      if (e.cross) { return {ok: true, kind: 'crossing'}; }
+      // snap/cross connectors are tier-agnostic EXCEPT when the connector only
+      // exists by way of a sidewalk node (foot). Without this gate a 0-length
+      // snap onto a sidewalk and back off it silently handed the Legal tier a
+      // free bridge through the footway network.
+      if (e.snap) {
+        if (e.foot && tier === 'legal') { return {ok: false, kind: null}; }
+        return {ok: true, kind: 'snap'};
+      }
+      if (e.cross) {
+        if (e.foot && tier === 'legal') { return {ok: false, kind: null}; }
+        return {ok: true, kind: 'crossing'};
+      }
       if (e.path) { return {ok: true, kind: 'path'}; }
       if (e.bikelane) { return {ok: true, kind: 'bikelane'}; }
       if (e.lot) { return {ok: true, kind: 'lot'}; }
+      // A footway/sidewalk in its own right (not a road that merely has one
+      // alongside -- that's sidewalk_fast, below). Decided BEFORE any
+      // speed-based branch: a footway has no meaningful speed, it just inherits
+      // SPEED.get(hw, 30), so letting it fall through would legalise an in-town
+      // sidewalk via `speed <= 25` (slow_street is legal in every tier).
+      //
+      // Ch.30 is the TOWN's ordinance, so its sidewalk ban binds only INSIDE the
+      // corporate limits. Outside them no ordinance bars sidewalk riding and NC
+      // law permits it (no intervening jurisdiction known), so an out-of-town
+      // sidewalk is legal today -- the same jurisdictional quirk already applied
+      // to roads via legal_other. A footway the Town's own GIS calls a greenway
+      // is legal anywhere and already returned above as kind 'path'.
+      if (e.foot) {
+        if (tier !== 'legal') { return {ok: true, kind: 'sidewalk_link'}; }
+        if (e.intown || e.freeway) { return {ok: false, kind: null}; }
+        return {ok: true, kind: 'legal_other'};
+      }
       if (e.speed <= 25) { return {ok: true, kind: 'slow_street'}; }
       // Riding a sidewalk (a >25 mph road with an adjacent sidewalk) is NOT
       // legal today -- Chapter 30 bars sidewalks -- so it is excluded from the
@@ -513,14 +541,15 @@ app_js = """
     // ---- summarize a path into a distance/kind breakdown (real meters,
     // independent of routing mode -- comfortable-mode "cost" is not mileage) --
     function summarize(steps, tier) {
-      var totals = {path: 0, bikelane: 0, slow_street: 0, sidewalk_fast: 0,
+      var totals = {path: 0, bikelane: 0, slow_street: 0, sidewalk_fast: 0, sidewalk_link: 0,
                     legal_other: 0, unsafe_connector: 0, lot: 0, crossing: 0, snap: 0};
       var swNames = [], unsafeNames = [];
       for (var i = 0; i < steps.length; i++) {
         var e = graph.edges[steps[i].idx];
         var cls = classify(e, tier);
         totals[cls.kind] = (totals[cls.kind] || 0) + e.len;
-        if (cls.kind === 'sidewalk_fast' && e.name && swNames.indexOf(e.name) === -1) {
+        if ((cls.kind === 'sidewalk_fast' || cls.kind === 'sidewalk_link')
+            && e.name && swNames.indexOf(e.name) === -1) {
           swNames.push(e.name);
         }
         if (cls.kind === 'unsafe_connector' && e.name && unsafeNames.indexOf(e.name) === -1) {
@@ -568,7 +597,7 @@ app_js = """
       }
 
       var b = sel.breakdown;
-      var rows = ['path', 'bikelane', 'lot', 'crossing', 'slow_street', 'sidewalk_fast', 'legal_other', 'unsafe_connector']
+      var rows = ['path', 'bikelane', 'lot', 'crossing', 'slow_street', 'sidewalk_fast', 'sidewalk_link', 'legal_other', 'unsafe_connector']
         .map(function(k) {
           var m = b.totals[k] || 0;
           if (m < 1) { return ''; }

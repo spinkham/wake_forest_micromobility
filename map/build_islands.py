@@ -27,6 +27,17 @@ from shapely.ops import unary_union
 
 ox.settings.use_cache = True
 ox.settings.cache_folder = "osm_cache"
+# osmnx's default useful_tags_way omits the tags that actually answer "may I
+# ride here?" -- bicycle/foot/footway/cycleway/surface were all absent from the
+# graph, which is why is_greenway_footway has to infer rideability by spatially
+# cross-referencing the Town's GIS instead of just reading OSM's own tag. These
+# only affect a graph REBUILD (a pinned wf_graph.pkl is loaded as-is); the
+# cached Overpass response already carries every tag, so re-pinning needs no
+# new network request and is topologically identical (verified: same 26064
+# nodes / 68725 edges / identical lengths).
+ox.settings.useful_tags_way = sorted(set(ox.settings.useful_tags_way) | {
+    "bicycle", "foot", "footway", "cycleway", "cycleway:left", "cycleway:right",
+    "cycleway:both", "surface", "segregated", "sidewalk", "smoothness"})
 PROJ = 32617
 SPEED = {"motorway": 55, "motorway_link": 45, "trunk": 45, "trunk_link": 35,
          "primary": 45, "primary_link": 35, "secondary": 35, "secondary_link": 35,
