@@ -133,10 +133,31 @@ _foot_cand = edges["hw"].isin(("footway", "pedestrian"))
 edges["is_greenway_footway"] = False
 edges.loc[_foot_cand, "is_greenway_footway"] = _ep.loc[edges[_foot_cand].index, "geometry"].apply(
     lambda g: g.intersection(_gw_buf).length >= 0.5 * g.length).values
-edges["is_path"] = edges["is_path"] | edges["is_greenway_footway"]
+
+# ---- ...and OSM's own answer, which we can finally read. The Town-GIS overlap
+# above is an INFERENCE from geometry, needed only because the pinned graph used
+# to be blind to the tag that states this outright. `bicycle=designated` means
+# the way is designated for bicycle use -- a signed shared-use path -- so it is a
+# path wherever it is, no cross-reference required. It is authoritative where the
+# Town's GIS is merely a 2021 snapshot: mup.geojson comes from the frozen
+# 2021_12_MUP layer (84 features), so a facility built since then is invisible to
+# it. Every named match here is a real one (Austin Creek Greenway, Durham Road /
+# Gateway Commons / Northside Loop / Stadium Drive MUPs, Granite Creek Greenway
+# Connector), all asphalt or concrete -- no dirt -- so no surface gate is needed.
+# `bicycle=yes` is deliberately NOT included: it means cycling is merely
+# permitted, and here it covers dirt MTB singletrack (Green Hills MTB Trail) that
+# is not a multi-use path.
+edges["is_designated_path"] = (edges["hw"].isin(("footway", "pedestrian"))
+                               & (edges["bicycle1"] == "designated"))
+edges["is_path"] = edges["is_path"] | edges["is_greenway_footway"] | edges["is_designated_path"]
 print(f"footway segments reclassified as rideable greenway/path (matched "
       f"Town GIS): {edges['is_greenway_footway'].sum()} edges, "
       f"{edges.loc[edges['is_greenway_footway'], 'len_mi'].sum():.1f} mi")
+_bic_new = edges["is_designated_path"] & ~edges["is_greenway_footway"]
+print(f"footway segments reclassified via OSM bicycle=designated: "
+      f"{edges['is_designated_path'].sum()} edges "
+      f"({_bic_new.sum()} of them NOT matched by the Town-GIS rule, "
+      f"{edges.loc[_bic_new, 'len_mi'].sum():.2f} mi newly a path)")
 
 # ---- parking lots: OSM tags parking-lot driving aisles and lot-entrance
 # driveways as highway=service (service=parking_aisle / driveway / alley /

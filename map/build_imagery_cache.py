@@ -167,11 +167,36 @@ def tile_path(out, z, x, y, fmt):
 
 
 # ---- overview pyramid -------------------------------------------------------
-def build_overviews(out, zmin, zmax, fmt, quality, method, pool=None):
-    total = 0
+def build_overviews(out, zmin, zmax, fmt, quality, method, pool=None,
+                    sess=None, service=None, extra=None, sleep=0.4):
+    """Downsample each level from the one below.
+
+    A parent with all 4 children is composited locally (free, no network). A
+    parent with only SOME children straddles the edge of the cached region --
+    the base z20 set is the town polygon's ragged tile-cover, so every level has
+    such a fringe.
+
+    Those partial parents used to be skipped outright, to avoid a tile with
+    black holes where children were missing. That is right about the holes but
+    wrong as a rule, because it COMPOUNDS: a dropped tile makes its own parent
+    incomplete, so the perimeter erodes inward one tile per level while the
+    level itself shrinks 4x. A z15 tile needs all 1024 of its z20 descendants,
+    i.e. the deep interior only -- which is why z15 ended up with 2 tiles, z14
+    with none, and z12-14 were then skipped entirely by the isdir() check.
+    That left the town-wide default view (~z13-14) with an EMPTY cache, so every
+    tile there paid a 404 plus a live exportImage round-trip.
+
+    Fix: fetch a partial parent's own bbox from the source instead of dropping
+    it -- one request per fringe tile, and the erosion stops at that level
+    rather than cascading. Fetches run serially (politeness); composites stay
+    parallel. Existing tiles are left alone, so this is resumable and a re-run
+    only fills gaps.
+    """
+    total = fetched = 0
     for z in range(zmax - 1, zmin - 1, -1):
         cz = os.path.join(out, str(z + 1))
         if not os.path.isdir(cz):
+            print(f"  z{z}: skipped (no z{z+1} to downsample from)")
             continue
         parents = {}
         for xs in os.listdir(cz):
@@ -180,15 +205,16 @@ def build_overviews(out, zmin, zmax, fmt, quality, method, pool=None):
                     cx, cy = int(xs), int(ys.split(".")[0])
                     parents.setdefault((cx // 2, cy // 2), []).append((cx, cy))
 
-        def _one(item, z=z):
-            # Only build a fully-covered (all 4 children) overview tile so it is
-            # opaque; partial edges are left absent -> 404 -> live NC OneMap
-            # fallback. Keeps the pyramid clean (no transparent fringe).
-            (px_, py_), kids = item
+        todo = [(p, k) for p, k in parents.items()
+                if not os.path.exists(tile_path(out, z, p[0], p[1], fmt))]
+        full, partial = [], []
+        for (px_, py_), kids in todo:
             need = {(2 * px_, 2 * py_), (2 * px_ + 1, 2 * py_),
                     (2 * px_, 2 * py_ + 1), (2 * px_ + 1, 2 * py_ + 1)}
-            if set(kids) != need:
-                return 0
+            (full if set(kids) == need else partial).append(((px_, py_), kids))
+
+        def _composite(item, z=z):
+            (px_, py_), kids = item
             canvas = Image.new("RGB", (512, 512))
             for cx, cy in kids:
                 canvas.paste(Image.open(tile_path(out, z + 1, cx, cy, fmt)).convert("RGB"),
@@ -198,9 +224,27 @@ def build_overviews(out, zmin, zmax, fmt, quality, method, pool=None):
             save_tile(small, tile_path(out, z, px_, py_, fmt), fmt, quality, method)
             return 1
 
-        made = sum(pool.map(_one, parents.items())) if pool else sum(_one(it) for it in parents.items())
-        total += made
-        print(f"  z{z}: {made} overview tiles")
+        made = sum(pool.map(_composite, full)) if pool else sum(_composite(it) for it in full)
+
+        nf = 0
+        if partial and sess is not None:
+            for (px_, py_), _kids in partial:
+                rgb = fetch_block(sess, service, block_bounds(z, px_, py_, 1), 256, sleep, extra)
+                os.makedirs(os.path.join(out, str(z), str(px_)), exist_ok=True)
+                save_tile(rgb, tile_path(out, z, px_, py_, fmt), fmt, quality, method)
+                nf += 1
+                time.sleep(sleep)
+        elif partial:
+            print(f"  z{z}: WARNING {len(partial)} fringe tiles need a source fetch "
+                  f"but no session was passed -- pyramid will erode")
+
+        total += made + nf
+        fetched += nf
+        have = sum(len(os.listdir(os.path.join(out, str(z), d)))
+                   for d in os.listdir(os.path.join(out, str(z)))) if os.path.isdir(os.path.join(out, str(z))) else 0
+        print(f"  z{z}: +{made} composited, +{nf} fetched (fringe) | {have} tiles total at this level")
+    if fetched:
+        print(f"overview fringe tiles fetched from source: {fetched}")
     return total
 
 
@@ -303,7 +347,8 @@ def main():
 
     print(f"base done: {written:,} z{z} tiles ({fetched} blocks fetched, {skipped} already cached)")
     print("building overviews...")
-    nov = build_overviews(a.out, a.zoom_min, z, a.format, a.quality, a.method, pool=pool)
+    nov = build_overviews(a.out, a.zoom_min, z, a.format, a.quality, a.method, pool=pool,
+                          sess=sess, service=service, extra=extra, sleep=a.sleep)
     print(f"done: {written:,} base + {nov:,} overview tiles in {a.out}/  ({time.time()-t0:.0f}s)")
     print(f"\nfolium/Leaflet usage (max_native_zoom = free client-side overzoom past z{z}):")
     print(f'  TileLayer(tiles="{a.out}/{{z}}/{{x}}/{{y}}.{a.format}", attr="NC OneMap",')
