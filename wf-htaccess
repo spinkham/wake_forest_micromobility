@@ -42,3 +42,32 @@ RewriteRule ^(.+)$ $1.br [L,E=no-gzip:1]
 <IfModule mod_filter.c>
   AddOutputFilterByType DEFLATE application/json
 </IfModule>
+
+# ---- aerial tile caching ----------------------------------------------------
+# The tile cache is a static snapshot of NC OneMap's Orthoimagery keyed by
+# z/x/y, so a given tile's bytes never change -- but Apache sent no
+# Cache-Control/Expires at all (only ETag/Last-Modified), leaving each browser
+# to GUESS a freshness lifetime heuristically and then re-validate every tile
+# with a conditional GET once its guess expired. A map view is ~35-60 tiles, so
+# that is dozens of pointless round-trips per revisit.
+#
+# 30 days, and deliberately NOT `immutable`: immutable would be a better fit for
+# content this static (never revalidate at all), but it would also mean a REBUILT
+# tile cache is not picked up until the year is out, forcing a version segment in
+# the path (map/tiles/v2/{z}/{x}/{y}) on every re-tile. At 30 days a rebuild
+# heals itself within a month and the recheck costs one conditional GET per tile
+# -- a 304 with no body, not a re-download. The ETag/Last-Modified Apache already
+# sends make that 304 work; what was missing was any freshness lifetime at all.
+#
+# Guarded: if the module isn't enabled the block is skipped rather than 500-ing
+# the vhost. mod_headers is the one that matters; mod_expires is belt-and-braces
+# for any client that ignores Cache-Control.
+<IfModule mod_headers.c>
+  <FilesMatch "\.webp$">
+    Header set Cache-Control "public, max-age=2592000"
+  </FilesMatch>
+</IfModule>
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType image/webp "access plus 30 days"
+</IfModule>

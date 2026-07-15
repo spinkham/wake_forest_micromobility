@@ -351,9 +351,30 @@ node_gdf = node_gdf[node_gdf.index.isin(used_nodes)]
 out_nodes = {str(idx): [round(row.geometry.y, 5), round(row.geometry.x, 5)]
              for idx, row in node_gdf.iterrows()}
 
+# ---- slim the payload ------------------------------------------------------
+# A snap/cross connector is a straight line between its two nodes, so its poly
+# was just a copy of two entries already in `nodes` -- drawRoute() rebuilds it
+# from the node coords instead. And seven per-edge booleans, written out in full
+# on every edge even when false, cost more than the geometry did: pack them into
+# one integer, omitted entirely when nothing is set. FLAG_BITS must stay in sync
+# with the F_* constants in build_router.py's classify().
+FLAG_BITS = {"path": 1, "bikelane": 2, "sidewalk": 4, "freeway": 8,
+             "intown": 16, "lot": 32, "foot": 64}
 for e in out_edges:
     if e.get("snap") or e.get("cross"):
-        e["poly"] = [out_nodes[str(e["u"])], out_nodes[str(e["v"])]]
+        e.pop("poly", None)
+    # connector spans are computed, not measured, so they carried the same float
+    # noise the real edges did; drop the trailing ".0" while we're here.
+    _l = round(e["len"], 1)
+    e["len"] = int(_l) if _l == int(_l) else _l
+    f = 0
+    for _name, _bit in FLAG_BITS.items():
+        if e.pop(_name, False):
+            f |= _bit
+    if f:
+        e["f"] = f
+    if e.get("name") is None:
+        e.pop("name", None)
 
 b = juris.total_bounds  # [minx, miny, maxx, maxy] in EPSG:4326 (lon, lat)
 result = {

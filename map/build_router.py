@@ -384,6 +384,13 @@ app_js = """
                         snap: 1.0, sidewalk_link: 1.8};
     var UNSAFE_PENALTY = 20;
 
+    // Per-edge booleans arrive packed into one integer `f` (omitted when 0) --
+    // written out in full they cost more than the geometry did. These bits MUST
+    // stay in sync with FLAG_BITS in build_route_graph.py.
+    var F_PATH = 1, F_BIKELANE = 2, F_SIDEWALK = 4, F_FREEWAY = 8,
+        F_INTOWN = 16, F_LOT = 32, F_FOOT = 64;
+    function has(e, bit) { return ((e.f || 0) & bit) !== 0; }
+
     // ---- graph load ------------------------------------------------------
     fetch('wf-route-graph.json').then(function(r) {
       if (!r.ok) { throw new Error('HTTP ' + r.status); }
@@ -419,16 +426,16 @@ app_js = """
       // snap onto a sidewalk and back off it silently handed the Legal tier a
       // free bridge through the footway network.
       if (e.snap) {
-        if (e.foot && tier === 'legal') { return {ok: false, kind: null}; }
+        if (has(e, F_FOOT) && tier === 'legal') { return {ok: false, kind: null}; }
         return {ok: true, kind: 'snap'};
       }
       if (e.cross) {
-        if (e.foot && tier === 'legal') { return {ok: false, kind: null}; }
+        if (has(e, F_FOOT) && tier === 'legal') { return {ok: false, kind: null}; }
         return {ok: true, kind: 'crossing'};
       }
-      if (e.path) { return {ok: true, kind: 'path'}; }
-      if (e.bikelane) { return {ok: true, kind: 'bikelane'}; }
-      if (e.lot) { return {ok: true, kind: 'lot'}; }
+      if (has(e, F_PATH)) { return {ok: true, kind: 'path'}; }
+      if (has(e, F_BIKELANE)) { return {ok: true, kind: 'bikelane'}; }
+      if (has(e, F_LOT)) { return {ok: true, kind: 'lot'}; }
       // A footway/sidewalk in its own right (not a road that merely has one
       // alongside -- that's sidewalk_fast, below). Decided BEFORE any
       // speed-based branch: a footway has no meaningful speed, it just inherits
@@ -441,9 +448,9 @@ app_js = """
       // sidewalk is legal today -- the same jurisdictional quirk already applied
       // to roads via legal_other. A footway the Town's own GIS calls a greenway
       // is legal anywhere and already returned above as kind 'path'.
-      if (e.foot) {
+      if (has(e, F_FOOT)) {
         if (tier !== 'legal') { return {ok: true, kind: 'sidewalk_link'}; }
-        if (e.intown || e.freeway) { return {ok: false, kind: null}; }
+        if (has(e, F_INTOWN) || has(e, F_FREEWAY)) { return {ok: false, kind: null}; }
         return {ok: true, kind: 'legal_other'};
       }
       if (e.speed <= 25) { return {ok: true, kind: 'slow_street'}; }
@@ -451,11 +458,11 @@ app_js = """
       // legal today -- Chapter 30 bars sidewalks -- so it is excluded from the
       // Legal tier; it stays available in Safe/Least-unsafe, which weigh
       // physical safety, not legality.
-      if (e.sidewalk && !e.freeway && tier !== 'legal') { return {ok: true, kind: 'sidewalk_fast'}; }
-      if (tier === 'legal' && !e.intown && e.speed <= 45 && !e.freeway) {
+      if (has(e, F_SIDEWALK) && !has(e, F_FREEWAY) && tier !== 'legal') { return {ok: true, kind: 'sidewalk_fast'}; }
+      if (tier === 'legal' && !has(e, F_INTOWN) && e.speed <= 45 && !has(e, F_FREEWAY)) {
         return {ok: true, kind: 'legal_other'};
       }
-      if (tier === 'least_unsafe' && e.speed < 45 && !e.freeway) {
+      if (tier === 'least_unsafe' && e.speed < 45 && !has(e, F_FREEWAY)) {
         return {ok: true, kind: 'unsafe_connector'};
       }
       return {ok: false, kind: null};
@@ -553,7 +560,7 @@ app_js = """
         totals[cls.kind] = (totals[cls.kind] || 0) + e.len;
         // Only IN-TOWN sidewalk riding needs the signed exception -- Ch.30 is
         // the town's ordinance; outside the limits it is already legal.
-        if ((cls.kind === 'sidewalk_fast' || cls.kind === 'sidewalk_link') && e.intown) {
+        if ((cls.kind === 'sidewalk_fast' || cls.kind === 'sidewalk_link') && has(e, F_INTOWN)) {
           swMi += e.len;
           if (e.name && swNames.indexOf(e.name) === -1) { swNames.push(e.name); }
         }
@@ -578,7 +585,14 @@ app_js = """
     function drawRoute(layerGroup, steps, tier) {
       for (var i = 0; i < steps.length; i++) {
         var st = steps[i], e = graph.edges[st.idx], coords = e.poly;
-        if (!coords || coords.length < 2) { continue; }
+        if (!coords || coords.length < 2) {
+          // snap/cross connectors ship without a poly -- they are a straight
+          // line between their two nodes, so rebuild it rather than send a
+          // duplicate of coords already in `nodes`.
+          var na = graph.nodes[String(e.u)], nb = graph.nodes[String(e.v)];
+          if (!na || !nb) { continue; }
+          coords = [na, nb];
+        }
         var cls = classify(e, tier);
         var oriented = (String(e.u) === st.from) ? coords : coords.slice().reverse();
         L.polyline(oriented, {
