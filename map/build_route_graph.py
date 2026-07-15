@@ -249,7 +249,9 @@ out_edges = []
 for _, r in rt.iterrows():
     out_edges.append({
         "u": int(r["u"]), "v": int(r["v"]),
-        "len": float(r.get("length") or 0.0),
+        # 0.1 m is far finer than the underlying geometry; the raw float ran to
+        # ~15 significant digits and cost ~0.7 MB of pure noise.
+        "len": round(float(r.get("length") or 0.0), 1),
         "name": clean_name(r.get("name")),
         "poly": line_coords(r["geom_simplified"]),
         "path": bool(r["is_path"]), "bikelane": bool(r["bikelane"]),
@@ -259,6 +261,28 @@ for _, r in rt.iterrows():
         # a footway/sidewalk usable only in the safe + least_unsafe tiers
         "foot": bool(r["is_footlink"] and not r["is_path"]),
     })
+
+# ---- drop reverse duplicates ------------------------------------------------
+# osmnx's MultiDiGraph carries a two-way street as BOTH u->v and v->u, and
+# graph_to_gdfs hands back every directed edge -- so ~49% of the exported edge
+# payload was a byte-for-byte reverse of another edge. The router never needed
+# it: buildGraph() pushes each edge into the adjacency in BOTH directions
+# itself, and drawRoute() re-orients the polyline per step
+# (`String(e.u) === st.from ? coords : coords.slice().reverse()`). Collapse a
+# pair only when EVERY other attribute matches too, so genuine parallel ways
+# between the same node pair (different name/speed/geometry) both survive.
+_before = len(out_edges)
+_seen, _dedup = set(), []
+for _e in out_edges:
+    _key = (min(_e["u"], _e["v"]), max(_e["u"], _e["v"]),
+            tuple(sorted((k, str(v)) for k, v in _e.items() if k not in ("u", "v", "poly"))))
+    if _key in _seen:
+        continue
+    _seen.add(_key)
+    _dedup.append(_e)
+out_edges = _dedup
+print(f"reverse-duplicate edges dropped: {_before - len(out_edges)} of {_before} "
+      f"({100 * (_before - len(out_edges)) / _before:.0f}%)")
 
 used_nodes = {e["u"] for e in out_edges} | {e["v"] for e in out_edges}
 # Nodes reachable WITHOUT setting foot on a footway -- i.e. the node set the

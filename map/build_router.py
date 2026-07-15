@@ -271,9 +271,9 @@ start &amp; end -- drag pins to adjust. Click into a field below to re-target it
 </div>
 <div id="wfTierNote" class="wf-hint" style="font-size:11px;margin:2px 0 8px"></div>
 <div style="margin-bottom:8px">
-  <label style="cursor:pointer"><input type="radio" name="wfMode" value="shortest" checked> Shortest</label>
+  <label style="cursor:pointer"><input type="radio" name="wfMode" value="shortest"> Shortest</label>
   &nbsp;&nbsp;
-  <label style="cursor:pointer"><input type="radio" name="wfMode" value="comfortable"> Most comfortable</label>
+  <label style="cursor:pointer"><input type="radio" name="wfMode" value="comfortable" checked> Most comfortable</label>
 </div>
 <button id="wfClear">Clear route</button>
 <div id="wfStatus" class="wf-status" style="font-size:11.5px;margin-top:6px"></div>
@@ -339,7 +339,10 @@ app_js = """
   function init() {
     if (!ready()) { return setTimeout(init, 150); }
     var map = @@MAP@@;
-    var state = { start: null, end: null, mode: 'shortest', tier: 'legal', placing: 'start' };
+    // NOTE: state.mode/tier are only updated on a radio 'change' event, so these
+    // defaults MUST match the `checked` radios in the panel HTML above -- if they
+    // drift, the first route silently uses a different mode than the UI shows.
+    var state = { start: null, end: null, mode: 'comfortable', tier: 'legal', placing: 'start' };
     var startMarker = null, endMarker = null;
     var routeLayer = L.layerGroup().addTo(map);
     var graph = null;
@@ -364,12 +367,12 @@ app_js = """
                   snap: '#999999', sidewalk_link: '#fdb863'};
     var LABELS = {path: 'Greenway / multi-use path / cycleway', bikelane: 'On-road bike lane',
                   slow_street: 'Street ≤25 mph',
-                  sidewalk_fast: 'Sidewalk on a road >25 mph (needs a signed exception)',
+                  sidewalk_fast: 'Sidewalk along a road >25 mph',
                   legal_other: 'Legal via jurisdiction exemption (outside town, \\u226445 mph, no freeway)',
                   unsafe_connector: 'Moderate-speed connector (26\\u201344 mph, no bike lane/sidewalk)',
                   lot: 'Parking lot aisle / driveway',
                   crossing: 'Marked crosswalk across a barrier road',
-                  sidewalk_link: 'Sidewalk / footway link (needs a signed exception)'};
+                  sidewalk_link: 'Sidewalk / footway link'};
     // sidewalk_fast was 4.0 -- too punitive: it could make "comfortable" mode
     // take a multi-mile detour through parking lots/greenways to dodge even a
     // short, perfectly rideable signed-sidewalk stretch, producing a LONGER
@@ -543,14 +546,16 @@ app_js = """
     function summarize(steps, tier) {
       var totals = {path: 0, bikelane: 0, slow_street: 0, sidewalk_fast: 0, sidewalk_link: 0,
                     legal_other: 0, unsafe_connector: 0, lot: 0, crossing: 0, snap: 0};
-      var swNames = [], unsafeNames = [];
+      var swNames = [], unsafeNames = [], swMi = 0;
       for (var i = 0; i < steps.length; i++) {
         var e = graph.edges[steps[i].idx];
         var cls = classify(e, tier);
         totals[cls.kind] = (totals[cls.kind] || 0) + e.len;
-        if ((cls.kind === 'sidewalk_fast' || cls.kind === 'sidewalk_link')
-            && e.name && swNames.indexOf(e.name) === -1) {
-          swNames.push(e.name);
+        // Only IN-TOWN sidewalk riding needs the signed exception -- Ch.30 is
+        // the town's ordinance; outside the limits it is already legal.
+        if ((cls.kind === 'sidewalk_fast' || cls.kind === 'sidewalk_link') && e.intown) {
+          swMi += e.len;
+          if (e.name && swNames.indexOf(e.name) === -1) { swNames.push(e.name); }
         }
         if (cls.kind === 'unsafe_connector' && e.name && unsafeNames.indexOf(e.name) === -1) {
           unsafeNames.push(e.name);
@@ -558,7 +563,8 @@ app_js = """
       }
       var totalLen = 0;
       for (var k in totals) { totalLen += totals[k]; }
-      return {totals: totals, totalLen: totalLen, swNames: swNames, unsafeNames: unsafeNames};
+      return {totals: totals, totalLen: totalLen, swNames: swNames,
+              unsafeNames: unsafeNames, swMi: swMi};
     }
 
     function escapeHtml(s) {
@@ -606,9 +612,11 @@ app_js = """
         }).join('');
 
       var notes = '';
-      if (b.swNames.length) {
-        notes += '<div class="wf-sw-note">Relies on a signed sidewalk exception on: '
-          + b.swNames.map(escapeHtml).join(', ') + '.</div>';
+      if (b.swMi > 1) {
+        notes += '<div class="wf-sw-note">Relies on a signed sidewalk exception for <b>'
+          + mi(b.swMi) + ' mi</b> in town'
+          + (b.swNames.length ? ' (' + b.swNames.map(escapeHtml).join(', ') + ')' : '')
+          + '.</div>';
       }
       if (b.unsafeNames.length) {
         notes += '<div class="wf-unsafe-note">Uses a moderate-speed connector on: '
