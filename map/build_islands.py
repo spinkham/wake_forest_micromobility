@@ -77,8 +77,27 @@ else:
     poly = gpd.GeoSeries([unary_union(juris.to_crs(PROJ).geometry.values).buffer(DETOUR_M)],
                          crs=PROJ).to_crs(4326).iloc[0]
     print(f"building OSM graph (+{DETOUR_M} m detour buffer) and pinning to {GRAPH_PKL}...")
-    G = ox.graph_from_polygon(poly, network_type="all", simplify=True,
+    # Simplify in two steps rather than via simplify=True, so a chain of degree-2
+    # nodes is NOT collapsed across a change in highway/surface/maxspeed.
+    #
+    # The default merges regardless, and then stores the merged ways' differing
+    # values as a LIST -- which osmnx reverses for the reverse direction. head()
+    # takes [0], so the SAME physical way came out classified differently
+    # depending on which way you traversed it: 638 of 639 mixed-highway edges
+    # flipped, ~65 km worth, and not just paths -- residential+service alone was
+    # 310 edges / 53 km, i.e. a legal 25 mph street one way and a 10 mph parking
+    # aisle the other. surface was a mixed list on 1660 edges, which is what
+    # build_route_graph.py's dirt gate reads.
+    #
+    # Splitting at those boundaries is the fix at source: every edge then has one
+    # unambiguous value, so head() is never a coin flip. Patching head() instead
+    # (most-permissive, or a priority order) would only pick a different
+    # arbitrary answer for an edge that is genuinely part cycleway, part footway.
+    # Cost is small: 26064 -> 29498 nodes (+13%), 68725 -> 75354 edges (+9.7%),
+    # and it drops mixed-highway and mixed-surface edges to zero.
+    G = ox.graph_from_polygon(poly, network_type="all", simplify=False,
                               retain_all=True, truncate_by_edge=True)
+    G = ox.simplify_graph(G, edge_attrs_differ=["highway", "surface", "maxspeed"])
     with open(GRAPH_PKL, "wb") as fh:
         pickle.dump(G, fh)
 

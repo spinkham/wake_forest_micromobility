@@ -122,7 +122,7 @@ def block_alpha(rings, minx, maxy, px, res):
 
 
 # ---- fetch + save -----------------------------------------------------------
-def fetch_block(sess, url, bounds, px, sleep, extra=None, retries=4):
+def fetch_block(sess, url, bounds, px, sleep, extra=None, retries=6):
     minx, miny, maxx, maxy = bounds
     params = {"bbox": f"{minx},{miny},{maxx},{maxy}", "bboxSR": 3857, "imageSR": 3857,
               "size": f"{px},{px}", "format": "png", "f": "image"}
@@ -319,6 +319,7 @@ def main():
 
     sess = requests.Session(); sess.headers["User-Agent"] = UA
     fetched = written = skipped = 0
+    failed = []
     t0 = time.time()
     for n, (bx, by) in enumerate(blocks, 1):
         if a.max_blocks and n > a.max_blocks:
@@ -328,7 +329,23 @@ def main():
         if not todo:
             skipped += 1
             continue
-        rgb = fetch_block(sess, service, bb, B * 256, a.sleep, extra); fetched += 1
+        # One block must never kill the run. NC OneMap returns HTTP 504s, and
+        # sometimes a 200 whose body is a JSON error rather than an image, under
+        # load -- and a 598-block job takes hours, so raising on the first block
+        # that exhausts its retries throws away everything still to do. (It did:
+        # a run died at block 310/598 after ~2.5 h.) Log it, count it, carry on.
+        # Nothing is lost -- already-fetched tiles are skipped on the next run,
+        # so re-running the same command retries only the blocks that failed.
+        try:
+            rgb = fetch_block(sess, service, bb, B * 256, a.sleep, extra)
+            fetched += 1
+        except RuntimeError as e:
+            failed.append((n, bb))
+            print(f"  block {n}/{len(blocks)} FAILED (will be retried on a re-run): {e}",
+                  file=sys.stderr)
+            time.sleep(a.sleep * 4)   # back off harder; the server is struggling
+            continue
+
         def _enc(t, rgb=rgb):
             i, j, tx, ty = t
             sub_rgb = np.ascontiguousarray(rgb[j*256:(j+1)*256, i*256:(i+1)*256, :])
@@ -346,6 +363,13 @@ def main():
         time.sleep(a.sleep)
 
     print(f"base done: {written:,} z{z} tiles ({fetched} blocks fetched, {skipped} already cached)")
+    if failed:
+        # Loud on purpose: a silently-missing block is a hole in the cache that
+        # only shows up later as a live-imagery fallback for the end user.
+        print(f"  *** {len(failed)} block(s) FAILED after retries and are NOT cached: "
+              f"{[n for n, _ in failed][:20]}{' ...' if len(failed) > 20 else ''}")
+        print(f"  *** re-run the same command to retry just those "
+              f"(cached tiles are skipped).")
     print("building overviews...")
     nov = build_overviews(a.out, a.zoom_min, z, a.format, a.quality, a.method, pool=pool,
                           sess=sess, service=service, extra=extra, sleep=a.sleep)
