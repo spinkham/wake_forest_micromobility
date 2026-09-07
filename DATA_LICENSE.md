@@ -37,9 +37,19 @@ confirm each source's current terms before relying on it.
 - **USGS Imagery** — *removed.* The National Map (USGS) is public domain and was
   an alternate aerial; the higher-resolution NC OneMap 6-inch layer now covers
   imagery, so it was dropped to keep a single aerial source.
-- **CARTO Positron** (default street basemap) — © OpenStreetMap, © CARTO. Free
-  for **non-commercial** use with attribution; commercial use needs a CARTO plan
-  (<https://carto.com/basemaps/>).
+- **CARTO Positron** (default street basemap) — © OpenStreetMap, © CARTO.
+  **Needs a free API key** as of August 2026: tiles fetched without one still
+  serve, but come back stamped with an "API KEY REQUIRED" watermark. The key is
+  free — 5 million tile requests per calendar month, no CARTO account — and is
+  meant for **non-commercial** use (research, teaching, personal projects, which
+  is what this is); commercial use needs a CARTO plan
+  (<https://carto.com/basemaps/>). CARTO *and* OpenStreetMap must both stay
+  credited on the map. This project's key lives in `map/basemap.py` and is
+  registered to the domain the maps are published from — **anyone hosting these
+  maps elsewhere must request their own key**
+  (<https://carto.com/basemaps/apikey/>) and replace it. CARTO has said it is
+  considering stopping data updates to the raster basemaps (vector is the
+  going-forward product), so this layer will need revisiting eventually.
 - **OpenStreetMap tiles** — © OpenStreetMap contributors. Subject to the OSMF
   **Tile Usage Policy** (<https://operations.osmfoundation.org/policies/tiles/>):
   light use only — not for heavy/commercial production. Self-host or use a

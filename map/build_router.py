@@ -36,6 +36,7 @@ import os
 import re
 import geopandas as gpd
 import folium
+from basemap import CARTO_POSITRON_URL, CARTO_ATTR
 
 PROJ = 32617
 
@@ -46,7 +47,7 @@ b = juris.total_bounds
 m = folium.Map(tiles=None, control_scale=True, max_zoom=22)
 m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
 
-folium.TileLayer("CartoDB positron", name="CartoDB Positron",
+folium.TileLayer(tiles=CARTO_POSITRON_URL, attr=CARTO_ATTR, name="CartoDB Positron",
                  overlay=False, control=True, max_native_zoom=20, max_zoom=22).add_to(m)
 folium.TileLayer("OpenStreetMap", name="OpenStreetMap", overlay=False, control=True,
                  show=False, max_native_zoom=19, max_zoom=22).add_to(m)

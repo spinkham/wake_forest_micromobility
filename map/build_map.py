@@ -20,6 +20,7 @@ from html import escape
 import geopandas as gpd
 import pandas as pd
 import folium
+from basemap import CARTO_POSITRON_URL, CARTO_ATTR
 from shapely import make_valid
 from shapely.geometry import Polygon, MultiPolygon
 from shapely.ops import unary_union
@@ -233,7 +234,7 @@ m = folium.Map(tiles=None, control_scale=True, max_zoom=22)
 m.fit_bounds([[b[1], b[0]], [b[3], b[2]]])
 
 # default street basemap (added first => shown by default)
-folium.TileLayer("CartoDB positron", name="CartoDB Positron",
+folium.TileLayer(tiles=CARTO_POSITRON_URL, attr=CARTO_ATTR, name="CartoDB Positron",
                  overlay=False, control=True, max_native_zoom=20, max_zoom=22).add_to(m)
 
 # alternate street basemap (choose in layer control); show=False so only CartoDB

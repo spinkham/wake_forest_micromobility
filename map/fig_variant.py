@@ -1,9 +1,10 @@
 import contextily as cx, geopandas as gpd, numpy as np
+from basemap import contextily_positron
 import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 _src = open("build_islands.py").read().split('print("\\n=== GROUNDED reachability')[0]
 exec(_src)
-POS=cx.providers.CartoDB.Positron
+POS=contextily_positron()
 lim=gpd.read_file("corporate_limits.geojson").to_crs(3857)
 STREETm=edges["intown"] & edges["hw"].isin(ROAD-FREEWAY)      # streets (counted)
 FREEm=edges["intown"] & edges["hw"].isin(FREEWAY)             # limited-access freeways (NOT counted)
