@@ -1,3 +1,4 @@
+import json
 import contextily as cx, geopandas as gpd, numpy as np
 from basemap import contextily_positron
 import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
@@ -52,5 +53,19 @@ plt.tight_layout(); plt.savefig("../figures/wake-forest-policy-impact-roads-gray
 
 def allpc(col):
     r=reach(col); return 100*r[(r.role=="main")&r.hw.isin(ROAD-FREEWAY)]["len_mi"].sum()/ALLSTREET
+
+
+# These two percentages are the article's headline numbers, and they appear in
+# four places each over there (opening claim, body, figure caption, revision
+# note) -- hand-editing them meant editing four spots and missing one, which is
+# exactly how the article came to say 78% under a figure that said 77%. Emit
+# them as data so the article build substitutes them instead; the private repo's
+# sync_numbers.py reads this file. Same expression panel() puts in the figure
+# titles, so caption and image cannot disagree.
+TODAY,FIX=allpc("trav_all"),allpc("trav_all_sw")
+json.dump({"reach_today_pct":round(TODAY),"reach_fix_pct":round(FIX),
+           "reach_today_pct_exact":round(TODAY,1),"reach_fix_pct_exact":round(FIX,1),
+           "generated_by":"map/fig_variant.py"},
+          open("../figures/stats.json","w"),indent=1)
 print("saved today/fix separate panels + combined gray | streets reachable",
-      round(allpc("trav_all")),"->",round(allpc("trav_all_sw")),"%")
+      round(TODAY),"->",round(FIX),"% (wrote figures/stats.json)")
