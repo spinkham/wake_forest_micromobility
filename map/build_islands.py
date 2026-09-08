@@ -23,6 +23,7 @@ import geopandas as gpd
 import pandas as pd
 import networkx as nx
 import osmnx as ox
+from shapely.geometry import Point
 from shapely.ops import unary_union
 
 ox.settings.use_cache = True
@@ -101,10 +102,30 @@ else:
     with open(GRAPH_PKL, "wb") as fh:
         pickle.dump(G, fh)
 
+# Cut every edge that crosses the corporate limits, so each piece is wholly
+# inside or wholly outside before anything is classified. Without this, whether
+# a straddling edge counted as in-town came down to where one representative
+# point happened to fall: a mapper adding two vertices to 631 ft of Jones Dairy
+# Road moved its rep point 37 m across the line, flipped the edge, and stranded
+# a 96.5 mi pod that reached the network only through it -- 8.8 points off the
+# headline from an edit that changed no road. Applied to the loaded graph rather
+# than baked into the pickle, so the pin stays raw OSM.
+import boundary_split
+G, _bs = boundary_split.split_at_boundary(G, jg)
+print(f"corporate-limits split: {_bs['crossed']} crossing edges -> {_bs['split']} split, "
+      f"+{_bs['new_nodes']} nodes, +{_bs['new_edges']} edges")
+
 edges = ox.graph_to_gdfs(G, nodes=False).reset_index()
 edges["hw"] = edges["highway"].map(head)
-edges["intown"] = edges.geometry.representative_point().within(jg)
-edges["len_mi"] = edges.to_crs(PROJ).length / 1609.34
+# Post-split an edge is wholly one side or the other, so a majority test is
+# exact rather than a coin flip; it also absorbs the few edges the split cannot
+# separate (a stretch of Averette Road that the boundary runs along, not across).
+_ep = edges.to_crs(PROJ)
+_len_m = _ep.length
+_in_m = _ep.geometry.intersection(
+    gpd.GeoSeries([jg], crs=4326).to_crs(PROJ).iloc[0]).length
+edges["intown"] = _in_m > 0.5 * _len_m
+edges["len_mi"] = _len_m / 1609.34
 
 # ---- NCDOT posted speed onto road edges (along-segment match; see nc_speed) --
 import nc_speed
@@ -112,14 +133,20 @@ roadmask = edges["hw"].isin(ROAD)
 edges["posted"] = nc_speed.assign_posted(edges, ncdot, roadmask, PROJ)
 
 
-def edge_speed(r):
-    if pd.notna(r["posted"]):
-        return int(r["posted"])
-    s = mph(r.get("maxspeed"))
-    return s if s is not None else SPEED.get(r["hw"], 30)
-
-
-edges["speed"] = edges.apply(edge_speed, axis=1)
+# Speed comes from evidence, not road class: NCDOT posted -> Ch.30 Sec. 30-216
+# Schedule XVII -> OSM maxspeed -> the ordinance's 25 mph default in town ->
+# class inference only outside the limits, where Ch.30 does not reach. Class
+# inference used to decide legal-or-not for 227 of 445 in-town road miles on no
+# evidence at all, and Chapter 30 turns entirely on the <=25 line.
+import ordinance_field
+_coords = {n: (d["x"], d["y"]) for n, d in G.nodes(data=True)}
+_gs = gpd.GeoSeries([Point(xy) for xy in _coords.values()], crs=4326).to_crs(PROJ)
+_coords_p = dict(zip(_coords.keys(), [(p.x, p.y) for p in _gs]))
+edges["speed"], edges["speed_basis"] = ordinance_field.build(
+    edges, _coords_p, PROJ, SPEED)
+print("speed basis (in-town road mi):",
+      {b: round(g["len_mi"].sum(), 1) for b, g in
+       edges[edges["intown"] & edges["hw"].isin(ROAD)].groupby("speed_basis")})
 
 # ---- existing on-road bike lanes (Town CTP) ---------------------------------
 bl_ex = gpd.read_file("town_bike_lanes.geojson").to_crs(PROJ)
@@ -336,6 +363,19 @@ out["role_all_sw"] = ride_all_sw["role"].reindex(out.index).fillna("na")
 out["role_le25_sw"] = ride_le_sw["role"].reindex(out.index).fillna("na")
 out["name"] = out["name"].astype(str)
 out.to_file("reachability.geojson", driver="GeoJSON")
+
+# The article quotes residential mileage cut off ("about 154 of the town's 339
+# miles of neighbourhood streets") as a stand-in for homes -- see the research
+# notes, "97 of 328 residential miles cut off". It was hand-computed and went
+# stale twice. Emit it so it can be anchored like the headline percentages.
+_res = reach("trav_all")
+_res = _res[_res["hw"] == "residential"]
+_res_total = edges[edges["intown"] & (edges["hw"] == "residential")]["len_mi"].sum()
+_res_cut = _res[_res["role"] == "island"]["len_mi"].sum()
+print(f"\nresidential street miles cut off: {_res_cut:.0f} of {_res_total:.0f} "
+      f"({_res_cut/_res_total*100:.0f}%)")
+_ARTICLE_STATS = {"residential_cut_mi": round(float(_res_cut)),
+                  "residential_total_mi": round(float(_res_total))}
 print("saved reachability.geojson (roles: role_all, role_le25, role_all_sw, role_le25_sw)")
 
 # ---- minimal >25 sidewalk sections to legalize to connect the town -----------
@@ -501,3 +541,25 @@ def _savegj(idxs, fn):
 _savegj(knee_idx, "sidewalk_knee.geojson")
 _savegj(parity_idx, "sidewalk_parity.geojson")
 print(f"  saved sidewalk_knee.geojson ({len(knee_idx)} seg) + sidewalk_parity.geojson ({len(parity_idx)} seg)")
+
+
+# ---- article-facing stats ---------------------------------------------------
+# Everything the article quotes that is NOT one of the two headline percentages
+# (those come from figures/stats.json via fig_variant.py). Hand-maintained
+# before; the residential figure went stale through two model revisions and the
+# signage remedy through one, which is exactly the drift sync_numbers.py exists
+# to stop.
+import json as _json
+from shapely.ops import unary_union as _uu
+
+_min_g = gpd.read_file("sidewalk_minimal.geojson").to_crs(PROJ)
+_par_g = gpd.read_file("sidewalk_parity.geojson").to_crs(PROJ)
+_parity_union = _uu([_uu(_min_g.geometry.values), _uu(_par_g.geometry.values)])
+_ARTICLE_STATS.update({
+    "signage_minimal_mi": round(float(_min_g.length.sum() / 1609.34), 1),
+    "signage_minimal_sections": int(len(_min_g)),
+    "signage_parity_mi": round(float(_parity_union.length / 1609.34), 1),
+    "signage_parity_sections": int(len(_par_g)),
+})
+_json.dump(_ARTICLE_STATS, open("reachability_stats.json", "w"), indent=1)
+print("article stats ->", _ARTICLE_STATS)

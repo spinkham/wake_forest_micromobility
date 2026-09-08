@@ -1,7 +1,7 @@
 {
- "reach_today_pct": 44,
- "reach_fix_pct": 77,
- "reach_today_pct_exact": 44.1,
- "reach_fix_pct_exact": 77.3,
+ "reach_today_pct": 39,
+ "reach_fix_pct": 69,
+ "reach_today_pct_exact": 38.5,
+ "reach_fix_pct_exact": 69.0,
  "generated_by": "map/fig_variant.py"
 }

@@ -108,7 +108,12 @@ if "maxspeed" not in osm.columns:
     osm["maxspeed"] = None
 
 # jurisdiction test on a point guaranteed to lie on each line
-osm["in_town"] = osm.geometry.representative_point().within(juris_geom)
+# Majority of the line's length, not which side one point lands on: a single
+# representative point made this depend on where a mapper had placed a vertex
+# (see build_islands.py, where the same defect cost 8.8 points of headline).
+_lp = osm.to_crs(PROJ)
+_jp = gpd.GeoSeries([juris_geom], crs=4326).to_crs(PROJ).iloc[0]
+osm["in_town"] = _lp.geometry.intersection(_jp).length > 0.5 * _lp.length
 
 # NCDOT posted speeds joined onto road lines (along-segment match; see nc_speed)
 import nc_speed
@@ -119,15 +124,15 @@ _rm = osm["hw"].isin(ROAD)
 osm["posted"] = nc_speed.assign_posted(osm, ncdot, _rm, PROJ)
 
 
-def edge_speed(row):
-    """NCDOT posted -> OSM maxspeed -> inferred by class."""
-    if pd.notna(row["posted"]):
-        return int(row["posted"])
-    s = parse_mph(row.get("maxspeed"))
-    return s if s is not None else SPEED_INFER.get(row["hw"], 30)
-
-
-osm["speed"] = osm.apply(edge_speed, axis=1)
+# NCDOT posted -> Ch.30 Sec. 30-216 Schedule XVII -> OSM maxspeed -> the
+# ordinance's 25 mph default in town. Class inference (SPEED_INFER) survives only
+# outside the corporate limits, where Chapter 30 does not reach. Keeps the map's
+# PERMITTED/GATED colouring on the same basis as the article's percentages.
+import ordinance_field
+osm["intown"] = osm["in_town"]
+osm["name"] = osm["name"] if "name" in osm.columns else None
+osm["speed"], osm["speed_basis"] = ordinance_field.build(
+    osm, {}, PROJ, SPEED_INFER, segments=False)
 
 # Some of the town's own paved, shared-use greenway trails are tagged
 # highway=footway in OSM instead of cycleway/path (e.g. Kiwanis Greenway,

@@ -29,3 +29,9 @@ map/tiles/
 
 # WebP/AVIF quality comparison tool (sample tiles + page)
 qcompare/
+
+# Large derived comparison table from map/ordinance_speed.py
+map/ordinance_speed_compare.csv
+
+# ...but the article-facing stats ARE an output (sync_numbers.py reads them)
+!map/reachability_stats.json
